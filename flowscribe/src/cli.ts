@@ -31,8 +31,8 @@ program
   .option('-n, --name <name>', 'session name')
   .option('--user <username>', 'HTTP basic-auth username (if the site requires it)')
   .option('--pass <password>', 'HTTP basic-auth password')
-  .option('--width <px>', 'viewport width', '1280')
-  .option('--height <px>', 'viewport height', '720')
+  .option('--width <px>', 'fixed viewport width (default: full browser window)')
+  .option('--height <px>', 'fixed viewport height (default: full browser window)')
   .option('--headless', 'run headless (for scripted/CI use)', false)
   .action(async (o) => {
     console.log(`\n▶ Recording ${o.url}`);
@@ -48,7 +48,10 @@ program
       user: o.user,
       pass: o.pass,
       headless: !!o.headless,
-      viewport: { width: Number(o.width), height: Number(o.height) },
+      viewport:
+        o.width && o.height
+          ? { width: Number(o.width), height: Number(o.height) }
+          : undefined,
     });
 
     process.on('SIGINT', () => {

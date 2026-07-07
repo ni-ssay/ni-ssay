@@ -12,6 +12,10 @@ export interface RecordOptions {
   /** HTTP basic-auth credentials, if the site needs them. */
   user?: string;
   pass?: string;
+  /**
+   * Fixed viewport. When omitted (the default), the browser opens maximized
+   * and the page fills the whole window — no letterboxing around the app.
+   */
   viewport?: { width: number; height: number };
   /** Headless mode — mainly for automated tests of FlowScribe itself. */
   headless?: boolean;
@@ -56,15 +60,19 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
   await mkdir(shotsDir, { recursive: true });
   await mkdir(videoDir, { recursive: true });
 
-  const viewport = opts.viewport ?? { width: 1280, height: 720 };
+  const fixedViewport = opts.viewport ?? null;
 
   const browser = await chromium.launch({
     headless: opts.headless ?? false,
     executablePath: process.env.FLOWSCRIBE_CHROMIUM || undefined,
+    // With no fixed viewport the window opens maximized and the page uses
+    // all of it — a fixed viewport letterboxes the app into a corner.
+    args: fixedViewport ? [] : ['--start-maximized'],
   });
   const context = await browser.newContext({
-    viewport,
-    recordVideo: { dir: videoDir, size: viewport },
+    viewport: fixedViewport,
+    // Video frames are scaled to fit; the page itself stays full-window.
+    recordVideo: { dir: videoDir, size: fixedViewport ?? { width: 1280, height: 720 } },
     httpCredentials:
       opts.user && opts.pass
         ? { username: opts.user, password: opts.pass }
@@ -78,7 +86,7 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     name: opts.name ?? `session-${new Date(startedAtMs).toISOString().replace(/[:.]/g, '-')}`,
     startUrl: opts.url,
     startedAt: new Date(startedAtMs).toISOString(),
-    viewport,
+    viewport: fixedViewport ?? { width: 1280, height: 720 },
     steps: [],
     videos: [],
   };
@@ -195,6 +203,13 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     page.once('domcontentloaded', async () => {
       if (!session.appTitle) {
         session.appTitle = await page.title().catch(() => undefined);
+      }
+      if (!fixedViewport && pages.length === 1) {
+        // Record the real full-window size so replays match what was seen.
+        const size = await page
+          .evaluate('({ width: window.innerWidth, height: window.innerHeight })')
+          .catch(() => null);
+        if (size) session.viewport = size as { width: number; height: number };
       }
     });
   };
