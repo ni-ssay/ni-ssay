@@ -39,8 +39,11 @@ function setState(state) {
 
 async function captureScreenshot(windowId) {
   try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
-    return dataUrl.replace(/^data:image\/png;base64,/, '');
+    const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
+      format: 'jpeg',
+      quality: 85,
+    });
+    return dataUrl.replace(/^data:image\/(png|jpeg);base64,/, '');
   } catch (e) {
     return null; // rate-limited or restricted page — keep the step anyway
   }

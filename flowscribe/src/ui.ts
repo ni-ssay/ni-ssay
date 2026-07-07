@@ -40,6 +40,8 @@ const MIME: Record<string, string> = {
   '.md': 'text/markdown; charset=utf-8',
   '.json': 'application/json',
   '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
   '.pdf': 'application/pdf',
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.webm': 'video/webm',
@@ -194,7 +196,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
       if (req.method === 'POST' && url.pathname === '/api/record/start') {
         if (recording) return send(409, { error: 'Already recording.' });
         const body = JSON.parse(await readBody(req)) as {
-          url: string; name?: string; user?: string; pass?: string;
+          url: string; name?: string; user?: string; pass?: string; video?: boolean;
         };
         if (!body.url) return send(400, { error: 'URL is required.' });
         const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
@@ -205,6 +207,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
           name: body.name?.trim() || undefined,
           user: body.user || undefined,
           pass: body.pass || undefined,
+          video: !!body.video,
         });
         recording = { handle, url: body.url, out };
         void handle.done.then(() => { recording = null; });
@@ -554,8 +557,9 @@ const UI_HTML = `<!doctype html>
     <div class="row">
       <input type="text" id="recUser" placeholder="basic-auth user (optional)" style="width:14rem">
       <input type="password" id="recPass" placeholder="basic-auth password" style="width:14rem">
+      <label title="Captures real motion but makes the browser feel less fluid. Off = a step video is built from the screenshots after you finish."><input type="checkbox" id="recVideo"> full-motion screencast</label>
     </div>
-    <div class="meta">A real browser opens. Everything you do is captured — clicks get a red highlight ring, plus video and screenshots. No AI during recording.</div>
+    <div class="hint">A real browser opens — fully native and fluid. Clicks get a red highlight ring + screenshot; a step-by-step video is built automatically when you stop. No AI during recording.</div>
   </div>
 
   <div class="card">
@@ -641,6 +645,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     name: document.getElementById('recName').value.trim(),
     user: document.getElementById('recUser').value.trim(),
     pass: document.getElementById('recPass').value,
+    video: document.getElementById('recVideo').checked,
   });
   refresh();
 });

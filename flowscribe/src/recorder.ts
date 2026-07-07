@@ -17,6 +17,13 @@ export interface RecordOptions {
    * and the page fills the whole window — no letterboxing around the app.
    */
   viewport?: { width: number; height: number };
+  /**
+   * Capture a full-motion screencast video while recording. This routes the
+   * page through Playwright's emulation + frame-capture pipeline, which
+   * makes interaction noticeably less fluid — so it is OFF by default and a
+   * step-by-step video is synthesized from the screenshots after the fact.
+   */
+  video?: boolean;
   /** Headless mode — mainly for automated tests of FlowScribe itself. */
   headless?: boolean;
 }
@@ -68,14 +75,18 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     args: opts.viewport ? [] : ['--start-maximized'],
   });
 
-  // Playwright renders emulated pages at device-scale-factor 1, so on
-  // high-DPI displays (e.g. Windows at 125%) the page paints smaller than
-  // the window, leaving dead bands right/bottom. Probe the real maximized
-  // window size AND devicePixelRatio, then emulate exactly that — the page
-  // fills the window pixel-perfectly and video recording keeps working.
+  // Default mode: NO viewport emulation and NO screencast. The page is a
+  // completely native browser window — fluid, correct DPI, full-size. A
+  // step video is synthesized from the screenshots after recording ends.
+  //
+  // Screencast mode (opts.video / fixed viewport): Playwright's recordVideo
+  // requires an emulated viewport; probe the real maximized window size AND
+  // devicePixelRatio first so the page still fills the window on high-DPI
+  // displays instead of letterboxing.
+  const screencast = !!opts.video || !!opts.viewport;
   let viewport = opts.viewport ?? null;
   let deviceScaleFactor: number | undefined;
-  if (!viewport) {
+  if (screencast && !viewport) {
     const probe = await browser.newContext({ viewport: null });
     try {
       const p = await probe.newPage();
@@ -100,16 +111,17 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     : { width: 1280, height: 720 };
 
   const context = await browser.newContext({
-    viewport,
-    ...(viewport && deviceScaleFactor ? { deviceScaleFactor } : {}),
-    // Video frames are scaled to fit; the page itself stays full-window.
-    recordVideo: { dir: videoDir, size: videoSize },
+    viewport: screencast ? viewport : null,
+    ...(screencast && viewport && deviceScaleFactor ? { deviceScaleFactor } : {}),
+    ...(screencast ? { recordVideo: { dir: videoDir, size: videoSize } } : {}),
     httpCredentials:
       opts.user && opts.pass
         ? { username: opts.user, password: opts.pass }
         : undefined,
   });
-  await context.tracing.start({ screenshots: true, snapshots: true });
+  // Trace screenshots also use the screencast pipeline — keep them off so
+  // recording stays fluid. DOM snapshots are cheap and stay on.
+  await context.tracing.start({ screenshots: false, snapshots: true });
 
   const startedAtMs = Date.now();
   const session: SessionData = {
@@ -137,12 +149,16 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
   };
 
   const captureScreenshot = (page: Page, step: RecordedStep) => {
-    const file = `step-${String(step.index).padStart(3, '0')}.png`;
+    // JPEG rather than PNG: visually identical for guides, much smaller,
+    // and decodable by Playwright's bundled ffmpeg for the step video.
+    const file = `step-${String(step.index).padStart(3, '0')}.jpg`;
     // Serialize screenshots so rapid clicks don't interleave.
     screenshotChain = screenshotChain.then(async () => {
       try {
         await page.screenshot({
           path: path.join(shotsDir, file),
+          type: 'jpeg',
+          quality: 85,
           timeout: 4000,
           // Don't touch the page: caret manipulation and animation freezing
           // force style flushes that users perceive as a click "glitch".
@@ -285,6 +301,15 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     const endedAtMs = Date.now();
     session.endedAt = new Date(endedAtMs).toISOString();
     session.durationMs = endedAtMs - startedAtMs;
+
+    // Fluid (non-screencast) recordings get their video synthesized now,
+    // from the step screenshots, so nothing slowed the live session down.
+    if (session.videos.length === 0) {
+      const { slideshowFromScreenshots } = await import('./video.js');
+      const rel = await slideshowFromScreenshots(outDir, session).catch(() => null);
+      if (rel) session.videos.push(rel);
+    }
+
     await writeFile(
       path.join(outDir, SESSION_FILE),
       JSON.stringify(session, null, 2),

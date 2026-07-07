@@ -191,11 +191,14 @@ async function imageRun(token: Tokens.Image, baseDir: string): Promise<ImageRun 
   const file = path.resolve(baseDir, token.href);
   const data = await readFile(file).catch(() => null);
   if (!data) return null;
-  const { width, height } = pngSize(data) ?? { width: 1280, height: 720 };
+  const ext = path.extname(file).toLowerCase();
+  const isJpeg = ext === '.jpg' || ext === '.jpeg';
+  const { width, height } =
+    (isJpeg ? jpegSize(data) : pngSize(data)) ?? { width: 1280, height: 720 };
   const maxWidth = 560; // fits comfortably on A4 with margins
   const scale = Math.min(1, maxWidth / width);
   return new ImageRun({
-    type: 'png',
+    type: isJpeg ? 'jpg' : 'png',
     data,
     transformation: {
       width: Math.round(width * scale),
@@ -208,4 +211,20 @@ async function imageRun(token: Tokens.Image, baseDir: string): Promise<ImageRun 
 function pngSize(buf: Buffer): { width: number; height: number } | null {
   if (buf.length < 24 || buf.toString('ascii', 1, 4) !== 'PNG') return null;
   return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+}
+
+/** Read dimensions from a JPEG's SOF marker. */
+function jpegSize(buf: Buffer): { width: number; height: number } | null {
+  if (buf.length < 4 || buf[0] !== 0xff || buf[1] !== 0xd8) return null;
+  let pos = 2;
+  while (pos + 9 < buf.length) {
+    if (buf[pos] !== 0xff) return null;
+    const marker = buf[pos + 1];
+    // SOF0–SOF15 carry dimensions (except DHT/JPG/DAC markers C4, C8, CC).
+    if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+      return { height: buf.readUInt16BE(pos + 5), width: buf.readUInt16BE(pos + 7) };
+    }
+    pos += 2 + buf.readUInt16BE(pos + 2);
+  }
+  return null;
 }

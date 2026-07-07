@@ -78,7 +78,7 @@ export async function importSession(opts: ImportOptions): Promise<SessionData> {
       files: s.files,
     };
     if (s.screenshotData) {
-      const file = `step-${String(step.index).padStart(3, '0')}.png`;
+      const file = `step-${String(step.index).padStart(3, '0')}.jpg`;
       await writeFile(path.join(shotsDir, file), Buffer.from(s.screenshotData, 'base64'));
       step.screenshot = `screenshots/${file}`;
     }

@@ -33,6 +33,7 @@ program
   .option('--pass <password>', 'HTTP basic-auth password')
   .option('--width <px>', 'fixed viewport width (default: full browser window)')
   .option('--height <px>', 'fixed viewport height (default: full browser window)')
+  .option('--video', 'capture full-motion screencast video (makes the browser less fluid); default is a step video built from screenshots afterwards', false)
   .option('--headless', 'run headless (for scripted/CI use)', false)
   .action(async (o) => {
     console.log(`\n▶ Recording ${o.url}`);
@@ -48,6 +49,7 @@ program
       user: o.user,
       pass: o.pass,
       headless: !!o.headless,
+      video: !!o.video,
       viewport:
         o.width && o.height
           ? { width: Number(o.width), height: Number(o.height) }

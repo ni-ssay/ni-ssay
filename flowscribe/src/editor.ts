@@ -75,7 +75,10 @@ export async function startEditor(opts: EditorOptions): Promise<http.Server> {
           res.end();
           return;
         }
-        res.writeHead(200, { 'Content-Type': 'image/png' });
+        const ext = path.extname(file).toLowerCase();
+        res.writeHead(200, {
+          'Content-Type': ext === '.png' ? 'image/png' : 'image/jpeg',
+        });
         res.end(await readFile(file));
         return;
       }
