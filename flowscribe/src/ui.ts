@@ -54,6 +54,10 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
   const sessionsRoot = path.resolve(opts.sessionsRoot ?? 'sessions');
   await loadDotEnv(path.join(root, '.env'));
 
+  // Always hand paths to the client with forward slashes — Windows
+  // backslashes get mangled the moment they touch JS string handling.
+  const rel = (p: string) => path.relative(root, p).split(path.sep).join('/');
+
   let recording: { handle: RecordingHandle; url: string; out: string } | null = null;
   const editors = new Map<string, string>(); // session dir -> editor url
   const jobs: Job[] = [];
@@ -105,7 +109,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
               await readFile(path.join(full, SESSION_FILE), 'utf8'),
             ) as SessionData;
             out.push({
-              dir: path.relative(root, full),
+              dir: rel(full),
               name: s.name,
               startedAt: s.startedAt,
               steps: s.steps.length,
@@ -130,16 +134,14 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
   };
 
   const listFiles = async (dir: string) => {
+    const { statSync } = await import('node:fs');
     const out: Array<{ path: string; size: number }> = [];
     const walk = async (d: string, depth: number) => {
       if (depth > 3) return;
       for (const e of await readdir(d, { withFileTypes: true }).catch(() => [])) {
         const full = path.join(d, e.name);
         if (e.isDirectory()) await walk(full, depth + 1);
-        else {
-          const { statSync } = await import('node:fs');
-          out.push({ path: path.relative(root, full), size: statSync(full).size });
-        }
+        else out.push({ path: rel(full), size: statSync(full).size });
       }
     };
     await walk(dir, 0);
@@ -162,7 +164,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
       if (req.method === 'GET' && url.pathname === '/api/state') {
         return send(200, {
           recording: recording
-            ? { url: recording.url, out: path.relative(root, recording.out) }
+            ? { url: recording.url, out: rel(recording.out) }
             : null,
           hasKey: !!process.env.GEMINI_API_KEY,
           sessions: await listSessions(),
@@ -206,7 +208,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
         });
         recording = { handle, url: body.url, out };
         void handle.done.then(() => { recording = null; });
-        return send(200, { ok: true, out: path.relative(root, out) });
+        return send(200, { ok: true, out: rel(out) });
       }
 
       if (req.method === 'POST' && url.pathname === '/api/record/stop') {
@@ -273,7 +275,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
           case 'export-test':
             job = pushJob(`Export Playwright test — ${name}`, async () => {
               const f = await exportTest({ sessionDir: dir });
-              return [path.relative(root, f)];
+              return [rel(f)];
             });
             break;
           case 'narrate':
@@ -285,7 +287,7 @@ export async function startUi(opts: UiOptions = {}): Promise<http.Server> {
                 mux: !!o.mux,
                 voice: o.voice ? String(o.voice) : undefined,
               });
-              return files.map((f) => path.relative(root, f));
+              return files.map((f) => rel(f));
             });
             break;
           default:
@@ -434,7 +436,7 @@ const UI_HTML = `<!doctype html>
   <div id="recBanner">
     <div class="pulse"></div>
     <div style="flex:1">Recording — interact with the opened browser window, then stop here (or just close that browser).</div>
-    <button onclick="stopRec()" style="background:#fff;color:#ff3b30">⏹ Stop recording</button>
+    <button id="stopBtn" style="background:#fff;color:#ff3b30">⏹ Stop recording</button>
   </div>
 
   <div class="card" id="recCard">
@@ -442,7 +444,7 @@ const UI_HTML = `<!doctype html>
     <div class="row">
       <input type="text" id="recUrl" placeholder="https://your-app.com" style="flex:1;min-width:16rem">
       <input type="text" id="recName" placeholder="session name (optional)" style="width:12rem">
-      <button class="primary" onclick="startRec()">⏺ Start recording</button>
+      <button class="primary" id="startBtn">⏺ Start recording</button>
     </div>
     <div class="row">
       <input type="text" id="recUser" placeholder="basic-auth user (optional)" style="width:14rem">
@@ -462,8 +464,12 @@ const UI_HTML = `<!doctype html>
   </div>
 </main>
 <script>
+// All rendering is DOM-built with real event listeners — no data is ever
+// interpolated into HTML/onclick strings (Windows paths contain backslashes
+// that string-injection would destroy). Sections only re-render when their
+// data actually changed, so typing in inputs is never wiped by the poll.
 let state = { sessions: [], jobs: [], recording: null, hasKey: false };
-const openOpts = {};
+const ui = { openPanels: {}, lastSessions: '', lastJobs: '', lastKey: null, lastRec: null };
 
 async function api(pathname, body) {
   const res = await fetch(pathname, body
@@ -474,10 +480,17 @@ async function api(pathname, body) {
   return data;
 }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s == null ? '' : String(s);
-  return d.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+function btn(label, className, onClick, disabledTitle) {
+  const b = el('button', className, label);
+  b.addEventListener('click', onClick);
+  if (disabledTitle) { b.disabled = true; b.title = disabledTitle; }
+  return b;
 }
 
 async function refresh() {
@@ -486,24 +499,36 @@ async function refresh() {
 }
 
 function renderKey() {
-  const el = document.getElementById('keyState');
-  el.innerHTML = state.hasKey
-    ? '<span>🔑 Gemini key set</span>'
-    : '<input type="password" id="keyInput" placeholder="GEMINI_API_KEY (for AI features)" style="width:15rem">' +
-      '<button class="small" onclick="saveKey()">Save</button>';
-}
-async function saveKey() {
-  const v = document.getElementById('keyInput').value;
-  if (!v) return;
-  await api('/api/key', { key: v });
-  refresh();
+  if (ui.lastKey === state.hasKey) return;
+  ui.lastKey = state.hasKey;
+  const host = document.getElementById('keyState');
+  host.innerHTML = '';
+  if (state.hasKey) {
+    host.appendChild(el('span', '', '🔑 Gemini key set'));
+    return;
+  }
+  const input = el('input');
+  input.type = 'password';
+  input.placeholder = 'GEMINI_API_KEY (for AI features)';
+  input.style.width = '15rem';
+  const save = btn('Save', 'small', async () => {
+    if (!input.value.trim()) return;
+    await api('/api/key', { key: input.value.trim() });
+    ui.lastKey = null; ui.lastSessions = '';
+    refresh();
+  });
+  host.appendChild(input); host.appendChild(save);
 }
 
 function renderRec() {
-  document.getElementById('recBanner').style.display = state.recording ? 'flex' : 'none';
-  document.getElementById('recCard').style.display = state.recording ? 'none' : 'block';
+  const active = !!state.recording;
+  if (ui.lastRec === active) return;
+  ui.lastRec = active;
+  document.getElementById('recBanner').style.display = active ? 'flex' : 'none';
+  document.getElementById('recCard').style.display = active ? 'none' : 'block';
 }
-async function startRec() {
+
+document.getElementById('startBtn').addEventListener('click', async () => {
   const url = document.getElementById('recUrl').value.trim();
   if (!url) { alert('Enter the URL of the app to record.'); return; }
   await api('/api/record/start', {
@@ -513,108 +538,153 @@ async function startRec() {
     pass: document.getElementById('recPass').value,
   });
   refresh();
-}
-async function stopRec() { await api('/api/record/stop', {}); refresh(); }
-
-function toggleOpt(id) {
-  openOpts[id] = !openOpts[id];
-  document.getElementById(id).classList.toggle('show', openOpts[id]);
-}
+});
+document.getElementById('stopBtn').addEventListener('click', async () => {
+  await api('/api/record/stop', {});
+  ui.lastSessions = '';
+  refresh();
+});
 
 function renderSessions() {
+  const snapshot = JSON.stringify([state.sessions, state.hasKey]);
+  if (snapshot === ui.lastSessions) return;
+  ui.lastSessions = snapshot;
+
   const host = document.getElementById('sessions');
+  host.innerHTML = '';
   if (!state.sessions.length) {
-    host.innerHTML = '<p class="empty">No sessions yet — record one above.</p>';
+    host.appendChild(el('p', 'empty', 'No sessions yet — record one above.'));
     return;
   }
-  host.innerHTML = state.sessions.map((s, i) => {
-    const gid = 'g' + i, nid = 'n' + i, fid = 'f' + i;
+  const needKey = state.hasKey ? null : 'Set your Gemini key first (top right)';
+
+  state.sessions.forEach((s) => {
+    const card = el('div', 'session');
+    const head = el('div', 's-head');
+    head.appendChild(el('b', '', s.name));
     const dur = s.durationMs ? Math.round(s.durationMs / 1000) + 's' : '';
-    return '<div class="session">' +
-      '<div class="s-head"><b>' + esc(s.name) + '</b>' +
-      '<span class="meta">' + esc((s.startedAt || '').replace('T', ' ').slice(0, 19)) + ' · ' + s.steps + ' steps · ' + dur + '</span>' +
-      (s.videos ? '<span class="badge">🎞 video</span>' : '') +
-      (s.assertions ? '<span class="badge">✅ ' + s.assertions + ' assertions</span>' : '') +
-      (s.healed ? '<span class="badge">🩹 healed</span>' : '') +
-      (s.hasGuide ? '<span class="badge">📘 guide</span>' : '') +
-      '</div>' +
-      '<div class="actions">' +
-      '<button class="small" onclick="editSession(\\'' + esc(s.dir) + '\\')">✎ Edit steps</button>' +
-      '<button class="small" onclick="toggleOpt(\\'' + gid + '\\')">📘 Guide…</button>' +
-      '<button class="small" onclick="job(\\'assert\\', \\'' + esc(s.dir) + '\\')" ' + (state.hasKey ? '' : 'disabled title="Set your Gemini key first"') + '>✅ Suggest assertions</button>' +
-      '<button class="small" onclick="job(\\'replay\\', \\'' + esc(s.dir) + '\\', { headed: true })">▶ Replay (watch)</button>' +
-      '<button class="small" onclick="job(\\'replay\\', \\'' + esc(s.dir) + '\\', {})">🤖 Replay (headless)</button>' +
-      '<button class="small" onclick="job(\\'export-test\\', \\'' + esc(s.dir) + '\\')">🧪 Export test</button>' +
-      '<button class="small" onclick="toggleOpt(\\'' + nid + '\\')">🎙 Narrate…</button>' +
-      '<button class="small" onclick="showFiles(\\'' + esc(s.dir) + '\\', \\'' + fid + '\\')">📂 Files</button>' +
-      '</div>' +
-      '<div class="opt' + (openOpts[gid] ? ' show' : '') + '" id="' + gid + '">' +
-      'Languages <input type="text" id="' + gid + 'l" value="en" title="comma-separated: en,fr,ar">' +
-      '<label><input type="checkbox" id="' + gid + 'v" checked> vision</label>' +
-      '<label><input type="checkbox" id="' + gid + 'p"> PDF</label>' +
-      '<label><input type="checkbox" id="' + gid + 'd"> DOCX</label>' +
-      '<button class="small primary" onclick="genGuide(\\'' + esc(s.dir) + '\\', \\'' + gid + '\\')" ' + (state.hasKey ? '' : 'disabled title="Set your Gemini key first"') + '>Generate</button>' +
-      '</div>' +
-      '<div class="opt' + (openOpts[nid] ? ' show' : '') + '" id="' + nid + '">' +
-      'Language <input type="text" id="' + nid + 'l" value="en">' +
-      '<label><input type="checkbox" id="' + nid + 't"> TTS voiceover</label>' +
-      '<label><input type="checkbox" id="' + nid + 'm"> mux onto video</label>' +
-      '<button class="small primary" onclick="narrateS(\\'' + esc(s.dir) + '\\', \\'' + nid + '\\')" ' + (state.hasKey ? '' : 'disabled title="Set your Gemini key first"') + '>Narrate</button>' +
-      '</div>' +
-      '<div class="files' + (openOpts[fid] ? ' show' : '') + '" id="' + fid + '"></div>' +
-      '</div>';
-  }).join('');
+    head.appendChild(el('span', 'meta',
+      (s.startedAt || '').replace('T', ' ').slice(0, 19) + ' · ' + s.steps + ' steps' + (dur ? ' · ' + dur : '')));
+    if (s.videos) head.appendChild(el('span', 'badge', '🎞 video'));
+    if (s.assertions) head.appendChild(el('span', 'badge', '✅ ' + s.assertions + ' assertions'));
+    if (s.healed) head.appendChild(el('span', 'badge', '🩹 healed'));
+    if (s.hasGuide) head.appendChild(el('span', 'badge', '📘 guide'));
+    card.appendChild(head);
+
+    // --- option panels (persist open/closed across refresh by dir) ---
+    const panelKey = (kind) => kind + ':' + s.dir;
+    const panel = (kind) => {
+      const p = el('div', 'opt' + (ui.openPanels[panelKey(kind)] ? ' show' : ''));
+      p.dataset.panel = panelKey(kind);
+      return p;
+    };
+    const toggle = (p) => {
+      const key = p.dataset.panel;
+      ui.openPanels[key] = !ui.openPanels[key];
+      p.classList.toggle('show', ui.openPanels[key]);
+    };
+
+    const guidePanel = panel('guide');
+    const gLangs = el('input'); gLangs.type = 'text'; gLangs.value = 'en'; gLangs.title = 'comma-separated: en,fr,ar';
+    const gVision = el('input'); gVision.type = 'checkbox'; gVision.checked = true;
+    const gPdf = el('input'); gPdf.type = 'checkbox';
+    const gDocx = el('input'); gDocx.type = 'checkbox';
+    guidePanel.append('Languages ', gLangs,
+      labelWrap(gVision, 'vision'), labelWrap(gPdf, 'PDF'), labelWrap(gDocx, 'DOCX'),
+      btn('Generate', 'small primary', () => job('generate', s.dir, {
+        langs: gLangs.value, vision: gVision.checked, pdf: gPdf.checked, docx: gDocx.checked,
+      }), needKey));
+
+    const narratePanel = panel('narrate');
+    const nLang = el('input'); nLang.type = 'text'; nLang.value = 'en';
+    const nTts = el('input'); nTts.type = 'checkbox';
+    const nMux = el('input'); nMux.type = 'checkbox';
+    narratePanel.append('Language ', nLang,
+      labelWrap(nTts, 'TTS voiceover'), labelWrap(nMux, 'mux onto video'),
+      btn('Narrate', 'small primary', () => job('narrate', s.dir, {
+        lang: nLang.value || 'en', tts: nTts.checked, mux: nMux.checked,
+      }), needKey));
+
+    const filesPanel = el('div', 'files' + (ui.openPanels[panelKey('files')] ? ' show' : ''));
+    filesPanel.dataset.panel = panelKey('files');
+    const loadFiles = async () => {
+      const files = await api('/api/files?dir=' + encodeURIComponent(s.dir));
+      filesPanel.innerHTML = '';
+      if (!files.length) { filesPanel.appendChild(el('span', 'empty', 'No files.')); return; }
+      files.forEach((f) => {
+        const a = el('a', '', f.path.split('/').slice(-2).join('/'));
+        a.href = '/file?path=' + encodeURIComponent(f.path);
+        a.target = '_blank';
+        filesPanel.appendChild(a);
+      });
+    };
+    if (ui.openPanels[panelKey('files')]) loadFiles();
+
+    // --- actions row ---
+    const actions = el('div', 'actions');
+    actions.append(
+      btn('✎ Edit steps', 'small', async () => {
+        const r = await api('/api/editor', { dir: s.dir });
+        window.open(r.url, '_blank');
+      }),
+      btn('📘 Guide…', 'small', () => toggle(guidePanel)),
+      btn('✅ Suggest assertions', 'small', () => job('assert', s.dir, {}), needKey),
+      btn('▶ Replay (watch)', 'small', () => job('replay', s.dir, { headed: true })),
+      btn('🤖 Replay (headless)', 'small', () => job('replay', s.dir, {})),
+      btn('🧪 Export test', 'small', () => job('export-test', s.dir, {})),
+      btn('🎙 Narrate…', 'small', () => toggle(narratePanel)),
+      btn('📂 Files', 'small', () => { toggle(filesPanel); if (ui.openPanels[panelKey('files')]) loadFiles(); }),
+    );
+    card.appendChild(actions);
+    card.appendChild(guidePanel);
+    card.appendChild(narratePanel);
+    card.appendChild(filesPanel);
+    host.appendChild(card);
+  });
 }
 
-async function editSession(dir) {
-  const { url } = await api('/api/editor', { dir: dir });
-  window.open(url, '_blank');
+function labelWrap(input, text) {
+  const l = el('label');
+  l.appendChild(input);
+  l.append(' ' + text);
+  return l;
 }
+
 async function job(cmd, dir, opts) {
   await api('/api/job', { cmd: cmd, dir: dir, opts: opts || {} });
+  ui.lastJobs = '';
   refresh();
-}
-function genGuide(dir, gid) {
-  job('generate', dir, {
-    langs: document.getElementById(gid + 'l').value,
-    vision: document.getElementById(gid + 'v').checked,
-    pdf: document.getElementById(gid + 'p').checked,
-    docx: document.getElementById(gid + 'd').checked,
-  });
-}
-function narrateS(dir, nid) {
-  job('narrate', dir, {
-    lang: document.getElementById(nid + 'l').value || 'en',
-    tts: document.getElementById(nid + 't').checked,
-    mux: document.getElementById(nid + 'm').checked,
-  });
-}
-async function showFiles(dir, fid) {
-  openOpts[fid] = !openOpts[fid];
-  const el = document.getElementById(fid);
-  el.classList.toggle('show', openOpts[fid]);
-  if (!openOpts[fid]) return;
-  const files = await api('/api/files?dir=' + encodeURIComponent(dir));
-  el.innerHTML = files.length
-    ? files.map((f) =>
-        '<a href="/file?path=' + encodeURIComponent(f.path) + '" target="_blank">' +
-        esc(f.path.split('/').slice(-2).join('/')) + '</a>').join('')
-    : '<span class="empty">No files.</span>';
 }
 
 function renderJobs() {
+  const snapshot = JSON.stringify(state.jobs);
+  if (snapshot === ui.lastJobs) return;
+  ui.lastJobs = snapshot;
+
   const host = document.getElementById('jobs');
-  if (!state.jobs.length) { host.innerHTML = '<p class="empty">Nothing running.</p>'; return; }
-  host.innerHTML = state.jobs.map((j) =>
-    '<div class="job">' +
-    '<span class="st ' + j.status + '">' + (j.status === 'running' ? '⏳' : j.status === 'done' ? '✔' : j.status === 'error' ? '✘' : '·') + ' ' + j.status + '</span> ' +
-    esc(j.label) +
-    (j.outputs && j.outputs.length
-      ? '<div>' + j.outputs.map((o) =>
-          '<a href="/file?path=' + encodeURIComponent(o) + '" target="_blank">' + esc(o.split('/').pop()) + '</a>').join('') + '</div>'
-      : '') +
-    (j.log && j.log.length ? '<pre>' + esc(j.log.join('\\n')) + '</pre>' : '') +
-    '</div>').join('');
+  host.innerHTML = '';
+  if (!state.jobs.length) {
+    host.appendChild(el('p', 'empty', 'Nothing running.'));
+    return;
+  }
+  state.jobs.forEach((j) => {
+    const card = el('div', 'job');
+    const icon = j.status === 'running' ? '⏳' : j.status === 'done' ? '✔' : j.status === 'error' ? '✘' : '·';
+    card.appendChild(el('span', 'st ' + j.status, icon + ' ' + j.status));
+    card.append(' ' + j.label);
+    if (j.outputs && j.outputs.length) {
+      const links = el('div');
+      j.outputs.forEach((o) => {
+        const a = el('a', '', o.split('/').pop());
+        a.href = '/file?path=' + encodeURIComponent(o);
+        a.target = '_blank';
+        links.appendChild(a);
+      });
+      card.appendChild(links);
+    }
+    if (j.log && j.log.length) card.appendChild(el('pre', '', j.log.join('\\n')));
+    host.appendChild(card);
+  });
 }
 
 refresh();
