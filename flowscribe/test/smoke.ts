@@ -27,7 +27,7 @@ const outDir = path.join(here, '.smoke-session');
 rmSync(outDir, { recursive: true, force: true });
 
 console.log('1/9 Recording scripted flow (headless)...');
-const handle = await record({ url: fixtureUrl, out: outDir, headless: true, name: 'smoke' });
+const handle = await record({ url: fixtureUrl, out: outDir, headless: true, name: 'smoke', trace: true });
 const { page } = handle;
 
 // Real input events via CDP are `isTrusted: true`, so the injected

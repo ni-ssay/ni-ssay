@@ -24,6 +24,11 @@ export interface RecordOptions {
    * step-by-step video is synthesized from the screenshots after the fact.
    */
   video?: boolean;
+  /**
+   * Capture a Playwright trace (trace.zip). Adds instrumentation overhead
+   * to every interaction, so it is off by default.
+   */
+  trace?: boolean;
   /** Headless mode — mainly for automated tests of FlowScribe itself. */
   headless?: boolean;
 }
@@ -57,6 +62,40 @@ interface EmitPayload {
 }
 
 /**
+ * Prefer the user's real installed Chrome/Edge for headed recording — the
+ * Playwright-bundled Chromium is a stripped build that can run without full
+ * GPU acceleration (noticeably laggy on Windows). Falls back to the bundled
+ * browser. FLOWSCRIBE_CHROMIUM forces a specific executable.
+ */
+async function launchBrowser(opts: {
+  headless: boolean;
+  args: string[];
+}): Promise<Browser> {
+  const base = {
+    headless: opts.headless,
+    args: opts.args,
+    // Drop the --enable-automation infobar: it throttles some page features
+    // and its banner resizes the page mid-session.
+    ignoreDefaultArgs: ['--enable-automation'],
+  };
+  if (process.env.FLOWSCRIBE_CHROMIUM) {
+    return chromium.launch({ ...base, executablePath: process.env.FLOWSCRIBE_CHROMIUM });
+  }
+  const channels: Array<string | undefined> = opts.headless
+    ? [undefined]
+    : ['chrome', 'msedge', undefined];
+  let lastError: Error | null = null;
+  for (const channel of channels) {
+    try {
+      return await chromium.launch({ ...base, channel });
+    } catch (err) {
+      lastError = err as Error;
+    }
+  }
+  throw lastError ?? new Error('No Chromium-based browser found.');
+}
+
+/**
  * Launch a browser and record every user interaction until it is closed.
  * No AI is involved here — recording is 100% local Playwright.
  */
@@ -67,9 +106,8 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
   await mkdir(shotsDir, { recursive: true });
   await mkdir(videoDir, { recursive: true });
 
-  const browser = await chromium.launch({
+  const browser = await launchBrowser({
     headless: opts.headless ?? false,
-    executablePath: process.env.FLOWSCRIBE_CHROMIUM || undefined,
     // Without a user-fixed viewport the window opens maximized and we match
     // the page to it exactly (see the probe below).
     args: opts.viewport ? [] : ['--start-maximized'],
@@ -119,9 +157,11 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
         ? { username: opts.user, password: opts.pass }
         : undefined,
   });
-  // Trace screenshots also use the screencast pipeline — keep them off so
-  // recording stays fluid. DOM snapshots are cheap and stay on.
-  await context.tracing.start({ screenshots: false, snapshots: true });
+  // Tracing instruments every interaction (and its screenshots use the
+  // screencast pipeline) — only pay for it when explicitly requested.
+  if (opts.trace) {
+    await context.tracing.start({ screenshots: false, snapshots: true });
+  }
 
   const startedAtMs = Date.now();
   const session: SessionData = {
@@ -135,6 +175,7 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
   };
 
   const pages: Page[] = [];
+  const cdpSessions = new Map<Page, Promise<import('playwright').CDPSession | null>>();
   let stepIndex = 0;
   let screenshotChain: Promise<void> = Promise.resolve();
 
@@ -155,17 +196,21 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     // Serialize screenshots so rapid clicks don't interleave.
     screenshotChain = screenshotChain.then(async () => {
       try {
-        await page.screenshot({
-          path: path.join(shotsDir, file),
-          type: 'jpeg',
-          quality: 85,
-          timeout: 4000,
-          // Don't touch the page: caret manipulation and animation freezing
-          // force style flushes that users perceive as a click "glitch".
-          caret: 'initial',
-          animations: 'allow',
-          scale: 'css',
-        });
+        // Raw CDP capture: a single fast readback, none of page.screenshot's
+        // stabilization (font waits, rAF roundtrips, caret handling) that
+        // hitches the page right at click time.
+        const cdp = await cdpSessions.get(page);
+        if (!cdp) return;
+        const shot = (await Promise.race([
+          cdp.send('Page.captureScreenshot', {
+            format: 'jpeg',
+            quality: 85,
+            optimizeForSpeed: true,
+          } as never),
+          new Promise((r) => setTimeout(() => r(null), 4000)),
+        ])) as { data: string } | null;
+        if (!shot?.data) return;
+        await writeFile(path.join(shotsDir, file), Buffer.from(shot.data, 'base64'));
         step.screenshot = `screenshots/${file}`;
       } catch {
         /* page may be navigating — skip the screenshot, keep the step */
@@ -238,6 +283,7 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
 
   const wirePage = (page: Page) => {
     pages.push(page);
+    cdpSessions.set(page, context.newCDPSession(page).catch(() => null));
     page.on('framenavigated', (frame) => {
       if (frame !== page.mainFrame()) return;
       const url = frame.url();
@@ -281,9 +327,11 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
   const doFinish = async (): Promise<SessionData> => {
 
     await screenshotChain.catch(() => {});
-    await context.tracing
-      .stop({ path: path.join(outDir, 'trace.zip') })
-      .catch(() => {});
+    if (opts.trace) {
+      await context.tracing
+        .stop({ path: path.join(outDir, 'trace.zip') })
+        .catch(() => {});
+    }
     await context.close().catch(() => {});
 
     for (const p of pages) {

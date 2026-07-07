@@ -34,6 +34,7 @@ program
   .option('--width <px>', 'fixed viewport width (default: full browser window)')
   .option('--height <px>', 'fixed viewport height (default: full browser window)')
   .option('--video', 'capture full-motion screencast video (makes the browser less fluid); default is a step video built from screenshots afterwards', false)
+  .option('--trace', 'capture a Playwright trace.zip (adds interaction overhead)', false)
   .option('--headless', 'run headless (for scripted/CI use)', false)
   .action(async (o) => {
     console.log(`\n▶ Recording ${o.url}`);
@@ -50,6 +51,7 @@ program
       pass: o.pass,
       headless: !!o.headless,
       video: !!o.video,
+      trace: !!o.trace,
       viewport:
         o.width && o.height
           ? { width: Number(o.width), height: Number(o.height) }
@@ -67,7 +69,7 @@ program
     console.log(`  Screenshots: ${path.resolve(o.out)}/screenshots/ (click highlights included)`);
     if (session.videos.length > 0)
       console.log(`  Video:       ${session.videos.map((v) => path.resolve(o.out, v)).join(', ')}`);
-    console.log(`  Trace:       ${path.resolve(o.out)}/trace.zip (open with: npx playwright show-trace)`);
+    if (o.trace) console.log(`  Trace:       ${path.resolve(o.out)}/trace.zip (open with: npx playwright show-trace)`);
     console.log('\nNext steps:');
     console.log(`  flowscribe generate    -s ${o.out} --langs en,fr     # AI user guide`);
     console.log(`  flowscribe export-test -s ${o.out}                   # Playwright test`);
