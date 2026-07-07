@@ -42,12 +42,19 @@ Only when *you* decide, the recording is handed to **Gemini** to produce polishe
 ```bash
 npm install
 npx playwright install chromium   # once, if Chromium isn't already installed
-export GEMINI_API_KEY=your-key    # only needed for generate / narrate
 ```
 
-Get a free Gemini API key at <https://aistudio.google.com/apikey>. Model defaults to `gemini-2.5-flash` (override with `GEMINI_MODEL` or `--model`).
+## 🎛 The easy way: FlowScribe Studio (no CLI needed)
 
-## Usage
+```bash
+npm start
+```
+
+That's it — a dashboard opens at <http://localhost:4600> where you can do **everything with buttons**: paste a URL and hit *Start recording*, stop, edit steps, generate guides in any language (+ PDF/DOCX), suggest assertions, replay (watch it live or headless), export tests, narrate with TTS, and download every artifact. Paste your Gemini API key once in the header — it's saved to a local `.env` (gitignored) so you never enter it again.
+
+Get a free Gemini API key at <https://aistudio.google.com/apikey>. Model defaults to `gemini-2.5-flash` (override with `GEMINI_MODEL` or `--model`). Only the AI features need it — recording, replay, editing, and PDF/DOCX export work without one.
+
+## Usage (CLI)
 
 ### 1. Record (no AI)
 
@@ -149,5 +156,6 @@ npm run cli -- info -s sessions/checkout
 - [x] PDF + DOCX guide export (`generate --pdf --docx`)
 - [x] Monitoring mode (`flowscribe monitor` — interval replays + webhook alerts)
 - [x] Chrome extension recorder (`extension/` + `flowscribe import`)
+- [x] FlowScribe Studio — local web dashboard (`npm start`)
 - [ ] Publish as an npm package (`npx flowscribe`)
 - [ ] Hosted guide sharing (single self-contained HTML export)

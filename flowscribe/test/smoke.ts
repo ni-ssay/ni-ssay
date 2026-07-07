@@ -26,7 +26,7 @@ const fixtureUrl = pathToFileURL(path.join(here, 'fixture.html')).href;
 const outDir = path.join(here, '.smoke-session');
 rmSync(outDir, { recursive: true, force: true });
 
-console.log('1/8 Recording scripted flow (headless)...');
+console.log('1/9 Recording scripted flow (headless)...');
 const handle = await record({ url: fixtureUrl, out: outDir, headless: true, name: 'smoke' });
 const { page } = handle;
 
@@ -87,7 +87,7 @@ assert.strictEqual(drag?.targetSelector, '#drop-zone', 'drop target not captured
 const upload = session.steps.find((s) => s.type === 'upload');
 assert.deepStrictEqual(upload?.files, ['report.pdf'], 'upload files not captured');
 
-console.log('2/8 Checking artifacts...');
+console.log('2/9 Checking artifacts...');
 assert.ok(existsSync(path.join(outDir, 'session.json')), 'session.json missing');
 const shots = session.steps.filter((s) => s.screenshot);
 assert.ok(shots.length >= 1, 'no click screenshots captured');
@@ -107,7 +107,7 @@ session.assertions = [
 ];
 writeFileSync(path.join(outDir, 'session.json'), JSON.stringify(session, null, 2));
 
-console.log('3/8 Exporting Playwright spec...');
+console.log('3/9 Exporting Playwright spec...');
 const specFile = await exportTest({ sessionDir: outDir });
 const spec = readFileSync(specFile, 'utf8');
 assert.ok(spec.includes("import { test, expect } from '@playwright/test'"));
@@ -115,13 +115,13 @@ assert.ok(spec.includes('[data-testid=\\"login-button\\"]') || spec.includes('da
 assert.ok(spec.includes(".fill(\"yassine\")"), 'spec missing fill value');
 assert.ok(spec.includes('getByText("Welcome back!")'), 'spec missing generated assertion');
 
-console.log('4/8 Replaying the flow headless (steps + assertions)...');
+console.log('4/9 Replaying the flow headless (steps + assertions)...');
 const result = await replay({ sessionDir: outDir, headless: true, slowMo: 0, heal: false });
 assert.strictEqual(result.failed, 0, `replay failures: ${JSON.stringify(result.failures, null, 2)}`);
 assert.strictEqual(result.assertionsPassed, 1, 'assertion did not pass during replay');
 assert.strictEqual(result.assertionsFailed, 0, 'assertion failed during replay');
 
-console.log('5/8 Exercising the step editor API...');
+console.log('5/9 Exercising the step editor API...');
 const editor = await startEditor({ sessionDir: outDir, port: 0 });
 const address = editor.address();
 const port = typeof address === 'object' && address ? address.port : 0;
@@ -158,7 +158,7 @@ assert.strictEqual(
 );
 assert.ok(existsSync(path.join(outDir, 'session.backup.json')), 'editor backup missing');
 
-console.log('6/8 Rendering PDF and DOCX guides...');
+console.log('6/9 Rendering PDF and DOCX guides...');
 const { renderPdf } = await import('../src/generator.js');
 const htmlFile = path.join(outDir, 'pdf-check.html');
 writeFileSync(htmlFile, '<!doctype html><html><body><h1>FlowScribe PDF check</h1></body></html>');
@@ -184,7 +184,7 @@ const docxBuf = readFileSync(docxFile);
 assert.ok(docxBuf.subarray(0, 2).toString() === 'PK', 'DOCX is not a zip');
 assert.ok(docxBuf.includes('word/document.xml'), 'DOCX missing document.xml');
 
-console.log('7/8 Verifying TTS cue alignment math...');
+console.log('7/9 Verifying TTS cue alignment math...');
 const { assembleAlignedPcm } = await import('../src/narrate.js');
 const rate = 8000; // 16 bytes per ms at 16-bit mono
 const clip = (ms: number) => Buffer.alloc(ms * (rate / 1000) * 2, 1);
@@ -207,7 +207,7 @@ assert.deepStrictEqual(
 );
 assert.strictEqual(pcm.length, 750 * 16, 'assembled PCM length wrong');
 
-console.log('8/8 Driving the extension content script → export → import → replay...');
+console.log('8/9 Driving the extension content script → export → import → replay...');
 const { chromium } = await import('playwright');
 const extBrowser = await chromium.launch({
   headless: true,
@@ -276,6 +276,35 @@ assert.strictEqual(
   `imported replay failures: ${JSON.stringify(importedReplay.failures, null, 2)}`,
 );
 
+console.log('9/9 Exercising the Studio UI API...');
+const { startUi } = await import('../src/ui.js');
+const ui = await startUi({ port: 4612, sessionsRoot: outDir });
+const uiBase = 'http://127.0.0.1:4612';
+const uiPage = await (await fetch(uiBase + '/')).text();
+assert.ok(uiPage.includes('FlowScribe Studio') || uiPage.includes('Studio'), 'UI page did not render');
+const uiState = await (await fetch(uiBase + '/api/state')).json();
+assert.ok(Array.isArray(uiState.sessions), 'UI state missing sessions');
+assert.ok(uiState.sessions.some((s: { name: string }) => s.name === 'ext-smoke'), 'UI did not list the imported session');
+
+const jobRes = await (
+  await fetch(uiBase + '/api/job', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cmd: 'export-test', dir: path.relative(process.cwd(), importedDir) }),
+  })
+).json();
+assert.ok(jobRes.id, 'UI job not created');
+let uiJob: { status: string; outputs: string[] } | undefined;
+for (let i = 0; i < 40; i++) {
+  const s = await (await fetch(uiBase + '/api/state')).json();
+  uiJob = s.jobs.find((j: { id: number }) => j.id === jobRes.id);
+  if (uiJob && (uiJob.status === 'done' || uiJob.status === 'error')) break;
+  await new Promise((r) => setTimeout(r, 250));
+}
+assert.strictEqual(uiJob?.status, 'done', 'UI export-test job did not finish');
+assert.ok(existsSync(path.join(importedDir, 'flow.spec.ts')), 'UI job did not write the spec');
+ui.close();
+
 console.log(
-  '\n✔ Smoke test passed: record (hover/drag/upload) → export-test → replay → editor → PDF/DOCX → TTS alignment → extension import all work.',
+  '\n✔ Smoke test passed: record (hover/drag/upload) → export-test → replay → editor → PDF/DOCX → TTS alignment → extension import → Studio UI all work.',
 );

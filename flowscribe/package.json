@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "tsc",
+    "start": "tsx src/cli.ts ui",
+    "ui": "tsx src/cli.ts ui",
     "cli": "tsx src/cli.ts",
     "record": "tsx src/cli.ts record",
     "generate": "tsx src/cli.ts generate",

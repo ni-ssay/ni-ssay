@@ -10,6 +10,7 @@ import { suggestAssertions } from './assertions.js';
 import { startEditor } from './editor.js';
 import { monitor, parseInterval } from './monitor.js';
 import { importSession } from './importSession.js';
+import { startUi, openBrowser } from './ui.js';
 import { loadSession, describeStep } from './session.js';
 
 const program = new Command();
@@ -207,6 +208,19 @@ program
       model: o.model,
       maxRuns: Number(o.maxRuns) || 0,
     });
+  });
+
+program
+  .command('ui')
+  .description('Open FlowScribe Studio — a local dashboard that drives everything with buttons.')
+  .option('-p, --port <port>', 'port to serve the dashboard on', '4600')
+  .option('--no-open', 'do not auto-open the browser')
+  .action(async (o) => {
+    await startUi({ port: Number(o.port) });
+    const url = `http://localhost:${o.port}`;
+    console.log(`\n🎛  FlowScribe Studio running at ${url}`);
+    console.log('   Record, edit, generate guides, replay, narrate — all from the browser. Ctrl+C to quit.');
+    if (o.open) openBrowser(url);
   });
 
 program
