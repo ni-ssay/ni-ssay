@@ -35,10 +35,19 @@ export function buildSpec(session: SessionData): string {
 
   for (const step of session.steps) {
     const code = stepToCode(step);
-    if (!code) continue;
-    lines.push('');
-    lines.push(`  // Step ${step.index}: ${describeStep(step).replace(/\n/g, ' ')}`);
-    lines.push(...code.map((l) => `  ${l}`));
+    if (code) {
+      lines.push('');
+      lines.push(`  // Step ${step.index}: ${describeStep(step).replace(/\n/g, ' ')}`);
+      lines.push(...code.map((l) => `  ${l}`));
+    }
+    for (const a of session.assertions ?? []) {
+      if (a.afterStep !== step.index) continue;
+      lines.push('');
+      if (a.note) lines.push(`  // Verify: ${a.note.replace(/\n/g, ' ')}`);
+      lines.push(
+        `  await expect(page.getByText(${q(a.text)}).first()).toBeVisible({ timeout: 10000 });`,
+      );
+    }
   }
 
   lines.push(`});`);

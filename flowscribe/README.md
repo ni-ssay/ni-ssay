@@ -29,6 +29,9 @@ Only when *you* decide, the recording is handed to **Gemini** to produce polishe
 - **🎞 Video export** — the session is recorded as `.webm` via Playwright's built-in video recorder, plus a full Playwright **trace** (`trace.zip`) you can open with `npx playwright show-trace`.
 - **🤖 Gemini-powered guides** — `generate` sends the step list (and optionally the screenshots, with `--vision`) to Gemini and writes a clean step-by-step guide as **Markdown and styled HTML**, with the annotated screenshots embedded — in **as many languages as you want at once** (`--langs en,fr,es,ar`). RTL languages (Arabic, Hebrew, …) get proper `dir="rtl"` HTML.
 - **🧪 Flow → test** — `export-test` converts the recording into a runnable `@playwright/test` spec (navigations become URL assertions), and `replay` re-executes the flow live with selector-fallback so Playwright can "do it himself" as a smoke test.
+- **🩹 Self-healing replays** — when the app's UI changes and a selector breaks, `replay` digests the live page's interactive elements, asks Gemini which one the step really targeted, retries, and **writes the repaired selector back** to `session.json` (original backed up). Your recorded tests fix themselves.
+- **✅ AI-suggested assertions** — `assert` has Gemini propose outcome-proving checks ("after clicking Sign in, 'Welcome back!' is visible"), grounded in the screenshots so it only asserts what it can see. They run on every `replay` and are baked into `export-test` specs — turning replays into real regression tests.
+- **✎ Step editor** — `edit` serves a local web UI (zero dependencies, no AI) to review the recording with its screenshots: delete misclicks, reorder steps, fix labels, redact values, prune assertions — then save before generating anything.
 - **🎙 How-to video narration** — `narrate` asks Gemini for a voiceover script timed to your recording's real timestamps, and writes both a read-aloud script and an **`.srt` subtitle file** — record your video and just read along.
 - **🔐 Access handling** — pass `--user/--pass` for HTTP basic auth; form logins are simply recorded like any other steps (passwords are masked in guides and narration, never sent to the AI).
 
@@ -70,15 +73,26 @@ npm run generate -- -s sessions/checkout --langs en,fr,ar --vision
 
 Writes `guide/guide.en.md`, `guide.en.html`, `guide.fr.md`, … with screenshots embedded and click positions highlighted.
 
-### 3. Let Playwright redo the flow itself
+### 3. Clean up the recording (optional, no AI)
 
 ```bash
-npm run replay -- -s sessions/checkout            # watch it live
-npm run export-test -- -s sessions/checkout       # or get a .spec.ts for CI
+npm run cli -- edit -s sessions/checkout
+# open http://localhost:4173 — delete misclicks, reorder, redact, save
+```
+
+### 4. Let Playwright redo the flow itself — with AI assertions and self-healing
+
+```bash
+npm run cli -- assert -s sessions/checkout        # Gemini proposes verifications
+npm run replay -- -s sessions/checkout            # watch it live; checks assertions;
+                                                  # broken selectors are healed via Gemini
+npm run export-test -- -s sessions/checkout       # .spec.ts for CI (assertions included)
 npx playwright test sessions/checkout/flow.spec.ts
 ```
 
-### 4. Narrated how-to video
+When a replay heals a selector, the fix is saved back to `session.json` (the original is kept in `session.backup.json`). Disable with `--no-heal`.
+
+### 5. Narrated how-to video
 
 ```bash
 npm run narrate -- -s sessions/checkout --lang en
@@ -103,8 +117,10 @@ npm run cli -- info -s sessions/checkout
 
 ## Roadmap
 
+- [x] Interactive step editor before generation (`flowscribe edit`)
+- [x] Gemini-suggested assertions in exported tests (`flowscribe assert`)
+- [x] Self-healing replays (broken selectors repaired by Gemini)
 - [ ] Hover / drag / file-upload capture
-- [ ] Interactive step editor before generation
-- [ ] Gemini-suggested assertions in exported tests
 - [ ] Voice synthesis (TTS) of the narration script
 - [ ] PDF / DOCX guide export
+- [ ] Scheduled monitoring mode (run flows on a cron, alert on failure)

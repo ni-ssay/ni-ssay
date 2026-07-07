@@ -34,6 +34,18 @@ export interface RecordedStep {
   screenshot?: string;
   /** True for sensitive inputs (passwords) — mask when generating guides. */
   masked?: boolean;
+  /** Set when a replay repaired this step's selector via AI healing. */
+  healed?: boolean;
+}
+
+/** A verification suggested by AI (or added by hand) for the recorded flow. */
+export interface FlowAssertion {
+  /** Check runs after the step with this index completes. */
+  afterStep: number;
+  /** Text expected to be visible on the page (substring match). */
+  text: string;
+  /** Why this assertion matters (shown as a comment in exported specs). */
+  note?: string;
 }
 
 export interface SessionData {
@@ -49,6 +61,8 @@ export interface SessionData {
   steps: RecordedStep[];
   /** Video files (relative to the session directory). */
   videos: string[];
+  /** Verifications for replay/export-test (see `flowscribe assert`). */
+  assertions?: FlowAssertion[];
 }
 
 export const SESSION_FILE = 'session.json';

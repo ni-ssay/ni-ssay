@@ -6,6 +6,8 @@ import { generateGuides } from './generator.js';
 import { exportTest } from './exportTest.js';
 import { replay } from './replay.js';
 import { narrate } from './narrate.js';
+import { suggestAssertions } from './assertions.js';
+import { startEditor } from './editor.js';
 import { loadSession, describeStep } from './session.js';
 
 const program = new Command();
@@ -97,19 +99,61 @@ program
 
 program
   .command('replay')
-  .description('Let Playwright re-execute the recorded flow by itself (smoke test).')
+  .description('Let Playwright re-execute the recorded flow by itself (smoke test). Broken selectors are self-healed via Gemini when GEMINI_API_KEY is set.')
   .requiredOption('-s, --session <dir>', 'recorded session directory')
   .option('--headless', 'run headless', false)
   .option('--slow-mo <ms>', 'delay between actions in ms', '250')
+  .option('--no-heal', 'disable AI self-healing of broken selectors')
+  .option('--model <model>', 'Gemini model used for healing')
   .action(async (o) => {
     console.log('▶ Replaying recorded flow...\n');
     const result = await replay({
       sessionDir: o.session,
       headless: !!o.headless,
       slowMo: Number(o.slowMo),
+      heal: o.heal,
+      model: o.model,
     });
-    console.log(`\n${result.failed === 0 ? '✔' : '✘'} Replay finished: ${result.passed} passed, ${result.failed} failed.`);
-    if (result.failed > 0) process.exitCode = 1;
+    const verdict = result.failed === 0 && result.assertionsFailed === 0 ? '✔' : '✘';
+    console.log(
+      `\n${verdict} Replay finished: ${result.passed} passed, ${result.failed} failed` +
+        (result.healed ? `, ${result.healed} healed 🩹` : '') +
+        (result.assertionsPassed + result.assertionsFailed > 0
+          ? ` | assertions: ${result.assertionsPassed} passed, ${result.assertionsFailed} failed`
+          : ''),
+    );
+    if (result.failed > 0 || result.assertionsFailed > 0) process.exitCode = 1;
+  });
+
+program
+  .command('assert')
+  .description('Let Gemini suggest verifications for the flow (stored in session.json; used by replay and export-test).')
+  .requiredOption('-s, --session <dir>', 'recorded session directory')
+  .option('--no-vision', 'do not send screenshots to Gemini')
+  .option('--model <model>', 'Gemini model (default: env GEMINI_MODEL or gemini-2.5-flash)')
+  .action(async (o) => {
+    const assertions = await suggestAssertions({
+      sessionDir: o.session,
+      vision: o.vision,
+      model: o.model,
+    });
+    console.log(`\n✔ ${assertions.length} assertion(s) saved to session.json:`);
+    for (const a of assertions) {
+      console.log(`  after step ${a.afterStep}: expect "${a.text}" visible${a.note ? ` — ${a.note}` : ''}`);
+    }
+    console.log('\nThey will be checked on every replay and included in export-test specs.');
+    console.log('Review or remove them anytime with: flowscribe edit -s ' + o.session);
+  });
+
+program
+  .command('edit')
+  .description('Open a local web editor to review/delete/reorder steps and redact values before generating.')
+  .requiredOption('-s, --session <dir>', 'recorded session directory')
+  .option('-p, --port <port>', 'port to serve the editor on', '4173')
+  .action(async (o) => {
+    await startEditor({ sessionDir: o.session, port: Number(o.port) });
+    console.log(`\n✎ Step editor running at http://localhost:${o.port}`);
+    console.log('  Edit your recording, hit Save, then Ctrl+C here when done.');
   });
 
 program
