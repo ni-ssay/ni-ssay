@@ -161,13 +161,7 @@
     try {
       clearHighlights();
       const boxed = el ? outlineElement(el) : false;
-      if (boxed) {
-        addOverlay(
-          'position:fixed;left:' + (x - 7) + 'px;top:' + (y - 7) + 'px;' +
-          'width:14px;height:14px;border-radius:50%;background:#ff3b30;' +
-          'border:3px solid #fff;box-shadow:0 0 8px rgba(255,59,48,0.8)',
-        );
-      } else {
+      if (!boxed) {
         const ring = addOverlay(
           'position:fixed;left:' + (x - 22) + 'px;top:' + (y - 22) + 'px;' +
           'width:44px;height:44px;border:4px solid #ff3b30;border-radius:50%;' +
