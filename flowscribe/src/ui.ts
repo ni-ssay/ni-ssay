@@ -374,62 +374,144 @@ const UI_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FlowScribe Studio</title>
 <style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body { font-family: system-ui, sans-serif; margin: 0; background: #f2f2f7; color: #1c1c1e; }
-  @media (prefers-color-scheme: dark) {
-    body { background: #101014; color: #ececf1; }
-    .card, header, .job { background: #1b1b21 !important; }
-    input, select { background: #2a2a31; color: #ececf1; border-color: #3a3a44 !important; }
-    button { background: #33333c; color: #ececf1; }
+  /* Theme tokens — every color goes through these, so light and dark are
+     always consistent (the old sheet had dark overrides losing specificity
+     against later base rules → invisible button labels). */
+  :root {
+    color-scheme: light dark;
+    --bg: #f3f4f6;
+    --card: #ffffff;
+    --text: #17181c;
+    --muted: #6b7280;
+    --border: #e2e4e9;
+    --border-strong: #cdd0d7;
+    --btn: #ffffff;
+    --btn-hover: #f4f5f7;
+    --field: #ffffff;
+    --panel: #f6f7f9;
+    --accent: #ff3b30;
+    --accent-soft: #ffe9e7;
+    --ok: #1f9d55;
+    --warn: #d97706;
+    --shadow: 0 1px 3px rgba(16,18,24,.08), 0 4px 14px rgba(16,18,24,.05);
+    --link: #2563eb;
   }
-  header { position: sticky; top: 0; z-index: 10; background: #fff; padding: .8rem 1.4rem;
-           display: flex; align-items: center; gap: 1rem; box-shadow: 0 1px 8px rgba(0,0,0,.12); }
-  header h1 { font-size: 1.15rem; margin: 0; } header h1 span { color: #ff3b30; }
-  #keyState { margin-left: auto; font-size: .8rem; display: flex; align-items: center; gap: .5rem; }
-  main { max-width: 1020px; margin: 0 auto; padding: 1.2rem; display: grid; gap: 1rem; }
-  .card { background: #fff; border-radius: 14px; padding: 1.1rem 1.3rem; box-shadow: 0 1px 5px rgba(0,0,0,.07); }
-  h2 { font-size: 1rem; margin: 0 0 .7rem; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e0f13;
+      --card: #17181e;
+      --text: #e9eaee;
+      --muted: #9298a3;
+      --border: #262832;
+      --border-strong: #363945;
+      --btn: #1f2129;
+      --btn-hover: #272a34;
+      --field: #1c1e26;
+      --panel: #1c1e25;
+      --accent: #ff453a;
+      --accent-soft: #3a1512;
+      --ok: #34c759;
+      --warn: #ffb340;
+      --shadow: 0 1px 3px rgba(0,0,0,.5);
+      --link: #7aa2ff;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
+         background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.5; }
+  a { color: var(--link); }
+
+  header { position: sticky; top: 0; z-index: 10; background: var(--card);
+           border-bottom: 1px solid var(--border);
+           padding: .75rem 1.4rem; display: flex; align-items: center; gap: 1rem; }
+  header h1 { font-size: 1.1rem; margin: 0; letter-spacing: -.01em; }
+  header h1 span { color: var(--accent); }
+  header .sub { font-size: .78rem; color: var(--muted); margin-top: -2px; }
+  #keyState { margin-left: auto; font-size: .82rem; display: flex; align-items: center; gap: .5rem; }
+  .keychip { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600;
+             color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent);
+             border: 1px solid color-mix(in srgb, var(--ok) 35%, transparent);
+             padding: .3rem .7rem; border-radius: 999px; }
+
+  main { max-width: 980px; margin: 0 auto; padding: 1.3rem 1.2rem 3rem; display: grid; gap: 1.1rem; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+          padding: 1.15rem 1.35rem; box-shadow: var(--shadow); }
+  h2 { font-size: .82rem; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+       color: var(--muted); margin: 0 0 .85rem; }
+
   input[type=text], input[type=password], select {
-    font: inherit; border: 1px solid #d1d1d6; border-radius: 8px; padding: .45rem .6rem; }
-  button { font: inherit; border: 0; border-radius: 9px; padding: .5rem .95rem; cursor: pointer; background: #e8e8ed; }
-  button:hover { filter: brightness(.96); }
-  button.primary { background: #ff3b30; color: #fff; font-weight: 600; }
-  button.small { padding: .32rem .7rem; font-size: .82rem; }
-  button:disabled { opacity: .45; cursor: default; }
-  .row { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .35rem 0; }
+    font: inherit; color: var(--text); background: var(--field);
+    border: 1px solid var(--border-strong); border-radius: 9px; padding: .5rem .65rem; }
+  input::placeholder { color: var(--muted); }
+  input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  button { font: inherit; font-size: .86rem; color: var(--text); cursor: pointer;
+           background: var(--btn); border: 1px solid var(--border-strong);
+           border-radius: 9px; padding: .48rem .9rem;
+           transition: background .12s, border-color .12s, transform .05s; }
+  button:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--accent); }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, black); }
+  button.small { padding: .34rem .7rem; font-size: .8rem; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+
+  .row { display: flex; gap: .55rem; align-items: center; flex-wrap: wrap; margin: .4rem 0; }
   .row label { font-size: .82rem; display: flex; align-items: center; gap: .3rem; }
-  #recBanner { display: none; background: #ff3b30; color: #fff; border-radius: 12px;
-               padding: .9rem 1.2rem; align-items: center; gap: 1rem; font-weight: 600; }
-  #recBanner .pulse { width: 12px; height: 12px; border-radius: 50%; background: #fff; animation: pulse 1.1s infinite; }
+  .hint { font-size: .8rem; color: var(--muted); margin-top: .5rem; }
+
+  #recBanner { display: none; background: linear-gradient(100deg, var(--accent), #d92c22);
+               color: #fff; border-radius: 16px; padding: 1rem 1.3rem;
+               align-items: center; gap: 1rem; font-weight: 600; box-shadow: var(--shadow); }
+  #recBanner .pulse { width: 12px; height: 12px; border-radius: 50%; background: #fff;
+                      animation: pulse 1.1s infinite; flex: none; }
+  #recBanner button { background: #fff; border-color: #fff; color: var(--accent); font-weight: 700; }
   @keyframes pulse { 50% { opacity: .25; } }
-  .session { border-top: 1px solid rgba(128,128,128,.18); padding: .85rem 0; }
-  .session:first-of-type { border-top: 0; }
-  .s-head { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; }
-  .s-head b { font-size: .98rem; }
-  .meta { font-size: .78rem; opacity: .65; }
-  .badge { font-size: .68rem; font-weight: 700; padding: .12rem .5rem; border-radius: 999px; background: #e8e8ed; }
-  @media (prefers-color-scheme: dark) { .badge { background: #33333c; } }
-  .actions { display: flex; gap: .45rem; flex-wrap: wrap; margin-top: .55rem; align-items: center; }
-  .opt { display: none; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .5rem;
-         padding: .6rem; border-radius: 10px; background: rgba(128,128,128,.09); font-size: .85rem; }
+
+  .session { border: 1px solid var(--border); border-radius: 13px;
+             padding: .95rem 1.05rem; margin-bottom: .8rem; background: var(--card); }
+  .session:last-child { margin-bottom: 0; }
+  .s-head { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .15rem; }
+  .s-head b { font-size: 1.02rem; letter-spacing: -.01em; }
+  .meta { font-size: .78rem; color: var(--muted); }
+  .badge { font-size: .68rem; font-weight: 700; padding: .14rem .55rem; border-radius: 999px;
+           background: var(--panel); border: 1px solid var(--border); color: var(--muted); }
+
+  .actions { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .6rem; align-items: center; }
+  .opt { display: none; gap: .6rem; align-items: center; flex-wrap: wrap; margin-top: .6rem;
+         padding: .65rem .8rem; border-radius: 10px; background: var(--panel);
+         border: 1px solid var(--border); font-size: .85rem; }
   .opt.show { display: flex; }
-  .opt input[type=text] { width: 7.5rem; padding: .3rem .5rem; }
-  .files { display: none; margin-top: .5rem; font-size: .84rem; }
+  .opt input[type=text] { width: 7.5rem; padding: .32rem .55rem; }
+
+  .files { display: none; margin-top: .6rem; font-size: .83rem; padding: .65rem .8rem;
+           border-radius: 10px; background: var(--panel); border: 1px solid var(--border); }
   .files.show { display: block; }
-  .files a { display: inline-block; margin: .15rem .6rem .15rem 0; }
-  .job { background: #fff; border-radius: 10px; padding: .6rem .9rem; margin-top: .5rem; font-size: .84rem; }
-  .job .st { font-weight: 700; }
-  .job .st.running { color: #ff9500; } .job .st.done { color: #34c759; } .job .st.error { color: #ff3b30; }
-  .job pre { margin: .4rem 0 0; max-height: 150px; overflow: auto; font-size: .75rem;
-             background: rgba(128,128,128,.1); padding: .5rem; border-radius: 8px; white-space: pre-wrap; }
-  .job a { margin-right: .6rem; }
-  .empty { opacity: .6; font-size: .88rem; }
+  .files a { display: inline-block; margin: .14rem .7rem .14rem 0; }
+
+  .job { border: 1px solid var(--border); background: var(--card); border-radius: 12px;
+         padding: .65rem .95rem; margin-bottom: .55rem; font-size: .85rem; }
+  .job:last-child { margin-bottom: 0; }
+  .job .st { font-weight: 700; margin-right: .35rem; }
+  .job .st.running { color: var(--warn); } .job .st.done { color: var(--ok); }
+  .job .st.error { color: var(--accent); } .job .st.queued { color: var(--muted); }
+  .job pre { margin: .45rem 0 0; max-height: 150px; overflow: auto; font-size: .74rem;
+             font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+             background: var(--panel); border: 1px solid var(--border);
+             padding: .55rem .65rem; border-radius: 8px; white-space: pre-wrap; color: var(--muted); }
+  .job a { margin-right: .7rem; }
+
+  .empty { color: var(--muted); font-size: .87rem; border: 1px dashed var(--border-strong);
+           border-radius: 10px; padding: .8rem 1rem; margin: 0; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Flow<span>Scribe</span> Studio</h1>
+  <div>
+    <h1>Flow<span>Scribe</span> Studio</h1>
+    <div class="sub">record → guide → test → video, all local</div>
+  </div>
   <div id="keyState"></div>
 </header>
 <main>
@@ -504,7 +586,7 @@ function renderKey() {
   const host = document.getElementById('keyState');
   host.innerHTML = '';
   if (state.hasKey) {
-    host.appendChild(el('span', '', '🔑 Gemini key set'));
+    host.appendChild(el('span', 'keychip', '🔑 Gemini connected'));
     return;
   }
   const input = el('input');
@@ -543,6 +625,9 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
   await api('/api/record/stop', {});
   ui.lastSessions = '';
   refresh();
+});
+document.getElementById('recUrl').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') document.getElementById('startBtn').click();
 });
 
 function renderSessions() {

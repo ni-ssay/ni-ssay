@@ -162,20 +162,28 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
       /* Draw the ripple synchronously so the screenshot taken from Node
          (a few ms later) captures it. */
       highlight(e.clientX, e.clientY);
-      const candidates = selectorCandidates(el);
-      emit({
-        kind: 'click',
-        selector: candidates[0] || null,
-        selectorCandidates: candidates,
-        tag: el.tagName.toLowerCase(),
-        text:
-          el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')
-            ? fieldLabel(el) || describe(el)
-            : describe(el) || fieldLabel(el),
-        x: Math.round(e.clientX),
-        y: Math.round(e.clientY),
-        url: location.href,
-      });
+      const x = Math.round(e.clientX);
+      const y = Math.round(e.clientY);
+      const url = location.href;
+      /* Selector computation walks the DOM — defer it out of the event
+         path so the app's own click handling is never delayed (heavy
+         pages felt glitchy when this ran synchronously). */
+      setTimeout(() => {
+        const candidates = selectorCandidates(el);
+        emit({
+          kind: 'click',
+          selector: candidates[0] || null,
+          selectorCandidates: candidates,
+          tag: el.tagName.toLowerCase(),
+          text:
+            el.tagName === 'INPUT' && (el.type === 'checkbox' || el.type === 'radio')
+              ? fieldLabel(el) || describe(el)
+              : describe(el) || fieldLabel(el),
+          x: x,
+          y: y,
+          url: url,
+        });
+      }, 0);
     },
     { capture: true },
   );
@@ -202,7 +210,8 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
     };
   };
 
-  /* Selects, checkboxes/radios and file inputs fire discrete 'change' events. */
+  /* Selects, checkboxes/radios and file inputs fire discrete 'change' events.
+     Work is deferred out of the event path (see pointerdown). */
   document.addEventListener(
     'change',
     (e) => {
@@ -214,30 +223,39 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
       if (tag === 'input' && el.type === 'file') {
         const files = Array.from(el.files || []).map((f) => f.name);
         if (files.length === 0) return;
-        emit(Object.assign({}, baseFor(el, tag), {
-          kind: 'upload',
-          files: files,
-          text: fieldLabel(el) || el.getAttribute('name') || '',
-        }));
+        setTimeout(() => {
+          emit(Object.assign({}, baseFor(el, tag), {
+            kind: 'upload',
+            files: files,
+            text: fieldLabel(el) || el.getAttribute('name') || '',
+          }));
+        }, 0);
         return;
       }
       if (!e.isTrusted) return;
       if (tag === 'select') {
+        const value = el.value;
         const opt = el.selectedOptions && el.selectedOptions[0];
-        emit(Object.assign({}, baseFor(el, tag), {
-          kind: 'select',
-          value: el.value,
-          text: opt ? opt.textContent || el.value : el.value,
-        }));
+        const text = opt ? opt.textContent || value : value;
+        setTimeout(() => {
+          emit(Object.assign({}, baseFor(el, tag), {
+            kind: 'select',
+            value: value,
+            text: text,
+          }));
+        }, 0);
       } else if (
         tag === 'input' &&
         (el.type === 'checkbox' || el.type === 'radio')
       ) {
-        emit(Object.assign({}, baseFor(el, tag), {
-          kind: 'check',
-          checked: el.checked,
-          text: fieldLabel(el) || describe(el),
-        }));
+        const checked = el.checked;
+        setTimeout(() => {
+          emit(Object.assign({}, baseFor(el, tag), {
+            kind: 'check',
+            checked: checked,
+            text: fieldLabel(el) || describe(el),
+          }));
+        }, 0);
       }
     },
     { capture: true },
@@ -254,18 +272,20 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
       if (!el || !(el instanceof Element)) return;
       const tag = el.tagName.toLowerCase();
       if (tag !== 'input' && tag !== 'textarea') return;
-      if (tag === 'input' && (el.type === 'checkbox' || el.type === 'radio')) return;
-      emit(Object.assign({}, baseFor(el, tag), {
-        kind: 'fill',
-        value: el.value,
-        masked: el.type === 'password',
-        text:
-          el.getAttribute('aria-label') ||
-          el.getAttribute('placeholder') ||
-          fieldLabel(el) ||
-          el.getAttribute('name') ||
-          '',
-      }));
+      if (tag === 'input' && (el.type === 'checkbox' || el.type === 'radio' || el.type === 'file')) return;
+      setTimeout(() => {
+        emit(Object.assign({}, baseFor(el, tag), {
+          kind: 'fill',
+          value: el.value,
+          masked: el.type === 'password',
+          text:
+            el.getAttribute('aria-label') ||
+            el.getAttribute('placeholder') ||
+            fieldLabel(el) ||
+            el.getAttribute('name') ||
+            '',
+        }));
+      }, 0);
     },
     { capture: true },
   );
@@ -361,15 +381,19 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
       if (!e.isTrusted) return;
       if (!['Enter', 'Escape', 'Tab'].includes(e.key)) return;
       const el = document.activeElement;
-      const candidates =
-        el && el !== document.body ? selectorCandidates(el) : [];
-      emit({
-        kind: 'press',
-        key: e.key,
-        selector: candidates[0] || null,
-        selectorCandidates: candidates,
-        url: location.href,
-      });
+      const key = e.key;
+      const url = location.href;
+      setTimeout(() => {
+        const candidates =
+          el && el !== document.body ? selectorCandidates(el) : [];
+        emit({
+          kind: 'press',
+          key: key,
+          selector: candidates[0] || null,
+          selectorCandidates: candidates,
+          url: url,
+        });
+      }, 0);
     },
     { capture: true },
   );

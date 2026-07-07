@@ -105,6 +105,11 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
         await page.screenshot({
           path: path.join(shotsDir, file),
           timeout: 4000,
+          // Don't touch the page: caret manipulation and animation freezing
+          // force style flushes that users perceive as a click "glitch".
+          caret: 'initial',
+          animations: 'allow',
+          scale: 'css',
         });
         step.screenshot = `screenshots/${file}`;
       } catch {
