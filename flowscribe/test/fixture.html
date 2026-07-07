@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>FlowScribe Demo App</title>
+  <style>
+    body { font-family: sans-serif; max-width: 480px; margin: 3rem auto; }
+    label { display: block; margin-top: 1rem; }
+    input, select, button { font-size: 1rem; padding: .4rem; margin-top: .25rem; }
+    #status { margin-top: 1.5rem; font-weight: bold; color: green; }
+  </style>
+</head>
+<body>
+  <h1>Demo Login</h1>
+  <form id="login-form">
+    <label>Username
+      <input type="text" name="username" placeholder="Your username">
+    </label>
+    <label>Password
+      <input type="password" name="password" placeholder="Your password">
+    </label>
+    <label>Role
+      <select name="role">
+        <option value="">Choose…</option>
+        <option value="admin">Administrator</option>
+        <option value="viewer">Viewer</option>
+      </select>
+    </label>
+    <label>
+      <input type="checkbox" name="remember" id="remember"> Remember me
+    </label>
+    <button type="submit" data-testid="login-button">Sign in</button>
+  </form>
+  <div id="status"></div>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      document.getElementById('status').textContent = 'Welcome back!';
+    });
+  </script>
+</body>
+</html>

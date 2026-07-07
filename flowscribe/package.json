@@ -1,0 +1,32 @@
+{
+  "name": "flowscribe",
+  "version": "0.1.0",
+  "description": "Record browser flows with Playwright, generate multilingual user guides with Gemini, replay flows as automated tests, and export narrated how-to videos with subtitles.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "flowscribe": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "cli": "tsx src/cli.ts",
+    "record": "tsx src/cli.ts record",
+    "generate": "tsx src/cli.ts generate",
+    "replay": "tsx src/cli.ts replay",
+    "export-test": "tsx src/cli.ts export-test",
+    "narrate": "tsx src/cli.ts narrate",
+    "typecheck": "tsc --noEmit",
+    "smoke": "tsx test/smoke.ts"
+  },
+  "dependencies": {
+    "commander": "^13.1.0",
+    "marked": "^15.0.7",
+    "playwright": "^1.50.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.50.0",
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
