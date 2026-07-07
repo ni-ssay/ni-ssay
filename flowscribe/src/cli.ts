@@ -8,6 +8,7 @@ import { replay } from './replay.js';
 import { narrate } from './narrate.js';
 import { suggestAssertions } from './assertions.js';
 import { startEditor } from './editor.js';
+import { monitor, parseInterval } from './monitor.js';
 import { loadSession, describeStep } from './session.js';
 
 const program = new Command();
@@ -73,6 +74,7 @@ program
   .requiredOption('-s, --session <dir>', 'recorded session directory')
   .option('-l, --langs <codes>', 'comma-separated language codes (e.g. en,fr,ar)', 'en')
   .option('--vision', 'also send click screenshots to Gemini for richer descriptions', false)
+  .option('--pdf', 'also render each guide as a PDF', false)
   .option('--model <model>', 'Gemini model (default: env GEMINI_MODEL or gemini-2.5-flash)')
   .action(async (o) => {
     const langs = String(o.langs).split(',').map((l: string) => l.trim()).filter(Boolean);
@@ -80,6 +82,7 @@ program
       sessionDir: o.session,
       langs,
       vision: !!o.vision,
+      pdf: !!o.pdf,
       model: o.model,
     });
     console.log('\n✔ Guide generated:');
@@ -161,12 +164,46 @@ program
   .description('Generate a voiceover script + .srt subtitles timed to the recording (Gemini).')
   .requiredOption('-s, --session <dir>', 'recorded session directory')
   .option('-l, --lang <code>', 'language code (e.g. en, fr, ar)', 'en')
+  .option('--tts', 'also synthesize the narration as audio (Gemini TTS)', false)
+  .option('--voice <name>', 'Gemini TTS voice (Kore, Puck, Charon, Fenrir, Aoede, ...)')
+  .option('--mux', 'mux the TTS audio onto the session video (implies --tts, needs ffmpeg)', false)
   .option('--model <model>', 'Gemini model (default: env GEMINI_MODEL or gemini-2.5-flash)')
   .action(async (o) => {
-    const files = await narrate({ sessionDir: o.session, lang: o.lang, model: o.model });
+    const files = await narrate({
+      sessionDir: o.session,
+      lang: o.lang,
+      model: o.model,
+      tts: !!o.tts || !!o.mux,
+      voice: o.voice,
+      mux: !!o.mux,
+    });
     console.log('\n✔ Narration generated:');
     for (const f of files) console.log(`  ${f}`);
     console.log('\nRead the script aloud while re-recording, or burn the .srt into your video.');
+  });
+
+program
+  .command('monitor')
+  .description('Replay the flow on an interval (synthetic monitoring); log every run, alert a webhook on failure.')
+  .requiredOption('-s, --session <dir>', 'recorded session directory')
+  .option('-i, --interval <duration>', 'time between runs (e.g. 90s, 15m, 1h)', '15m')
+  .option('--webhook <url>', 'POST a JSON report here when a run fails or self-heals')
+  .option('--headed', 'run with a visible browser', false)
+  .option('--max-runs <n>', 'stop after N runs (default: run forever)', '0')
+  .option('--no-heal', 'disable AI self-healing of broken selectors')
+  .option('--model <model>', 'Gemini model used for healing')
+  .action(async (o) => {
+    const intervalMs = parseInterval(o.interval);
+    console.log(`▶ Monitoring flow every ${o.interval} — results in <session>/monitor.log. Ctrl+C to stop.\n`);
+    await monitor({
+      sessionDir: o.session,
+      intervalMs,
+      webhook: o.webhook,
+      headless: !o.headed,
+      heal: o.heal,
+      model: o.model,
+      maxRuns: Number(o.maxRuns) || 0,
+    });
   });
 
 program

@@ -22,7 +22,7 @@ const fixtureUrl = pathToFileURL(path.join(here, 'fixture.html')).href;
 const outDir = path.join(here, '.smoke-session');
 rmSync(outDir, { recursive: true, force: true });
 
-console.log('1/4 Recording scripted flow (headless)...');
+console.log('1/6 Recording scripted flow (headless)...');
 const handle = await record({ url: fixtureUrl, out: outDir, headless: true, name: 'smoke' });
 const { page } = handle;
 
@@ -38,6 +38,20 @@ await page.focus('select[name="role"]');
 await page.keyboard.press('ArrowDown');
 await page.check('#remember');
 await page.click('[data-testid="login-button"]');
+await page.waitForTimeout(300);
+
+// Hover (dwell >= 800ms opens the menu), then click inside it.
+await page.hover('#menu-button');
+await page.waitForTimeout(1100);
+await page.click('#menu-item-docs');
+
+// HTML5 drag & drop and a file upload.
+await page.dragAndDrop('#drag-me', '#drop-zone');
+await page.setInputFiles('#attachment', {
+  name: 'report.pdf',
+  mimeType: 'application/pdf',
+  buffer: Buffer.from('%PDF-1.4 placeholder'),
+});
 await page.waitForTimeout(400);
 
 const session = await handle.stop();
@@ -61,7 +75,15 @@ const loginClick = session.steps.find(
 );
 assert.ok(loginClick, 'data-testid selector not preferred for the login button');
 
-console.log('2/4 Checking artifacts...');
+const hover = session.steps.find((s) => s.type === 'hover');
+assert.strictEqual(hover?.selector, '#menu-button', 'hover step not captured');
+const drag = session.steps.find((s) => s.type === 'drag');
+assert.strictEqual(drag?.selector, '#drag-me', 'drag source not captured');
+assert.strictEqual(drag?.targetSelector, '#drop-zone', 'drop target not captured');
+const upload = session.steps.find((s) => s.type === 'upload');
+assert.deepStrictEqual(upload?.files, ['report.pdf'], 'upload files not captured');
+
+console.log('2/6 Checking artifacts...');
 assert.ok(existsSync(path.join(outDir, 'session.json')), 'session.json missing');
 const shots = session.steps.filter((s) => s.screenshot);
 assert.ok(shots.length >= 1, 'no click screenshots captured');
@@ -81,7 +103,7 @@ session.assertions = [
 ];
 writeFileSync(path.join(outDir, 'session.json'), JSON.stringify(session, null, 2));
 
-console.log('3/5 Exporting Playwright spec...');
+console.log('3/6 Exporting Playwright spec...');
 const specFile = await exportTest({ sessionDir: outDir });
 const spec = readFileSync(specFile, 'utf8');
 assert.ok(spec.includes("import { test, expect } from '@playwright/test'"));
@@ -89,13 +111,13 @@ assert.ok(spec.includes('[data-testid=\\"login-button\\"]') || spec.includes('da
 assert.ok(spec.includes(".fill(\"yassine\")"), 'spec missing fill value');
 assert.ok(spec.includes('getByText("Welcome back!")'), 'spec missing generated assertion');
 
-console.log('4/5 Replaying the flow headless (steps + assertions)...');
+console.log('4/6 Replaying the flow headless (steps + assertions)...');
 const result = await replay({ sessionDir: outDir, headless: true, slowMo: 0, heal: false });
 assert.strictEqual(result.failed, 0, `replay failures: ${JSON.stringify(result.failures, null, 2)}`);
 assert.strictEqual(result.assertionsPassed, 1, 'assertion did not pass during replay');
 assert.strictEqual(result.assertionsFailed, 0, 'assertion failed during replay');
 
-console.log('5/5 Exercising the step editor API...');
+console.log('5/6 Exercising the step editor API...');
 const editor = await startEditor({ sessionDir: outDir, port: 0 });
 const address = editor.address();
 const port = typeof address === 'object' && address ? address.port : 0;
@@ -132,4 +154,12 @@ assert.strictEqual(
 );
 assert.ok(existsSync(path.join(outDir, 'session.backup.json')), 'editor backup missing');
 
-console.log('\n✔ Smoke test passed: record → artifacts → export-test (with assertions) → replay → editor all work.');
+console.log('6/6 Rendering a PDF with headless Chromium...');
+const { renderPdf } = await import('../src/generator.js');
+const htmlFile = path.join(outDir, 'pdf-check.html');
+writeFileSync(htmlFile, '<!doctype html><html><body><h1>FlowScribe PDF check</h1></body></html>');
+const pdfFile = path.join(outDir, 'pdf-check.pdf');
+await renderPdf(htmlFile, pdfFile);
+assert.ok(readFileSync(pdfFile).subarray(0, 5).toString() === '%PDF-', 'PDF not rendered');
+
+console.log('\n✔ Smoke test passed: record (incl. hover/drag/upload) → export-test → replay → editor → PDF all work.');

@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import { copyFile, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { healSelector } from './heal.js';
 import { loadSession, describeStep } from './session.js';
@@ -182,7 +183,40 @@ async function runStep(
         await page.keyboard.press(step.key ?? 'Enter');
       }
       return;
+    case 'hover':
+      await tryCandidates(page, step, (loc) => loc.hover({ timeout }));
+      return;
+    case 'drag': {
+      if (!step.targetSelector) throw new Error('Drag step has no drop target.');
+      const target = page.locator(step.targetSelector).first();
+      await tryCandidates(page, step, (loc) => loc.dragTo(target, { timeout }));
+      return;
+    }
+    case 'upload': {
+      const files = placeholderUploadFiles(step.files ?? []);
+      if (files.length === 0) throw new Error('Upload step has no file names.');
+      await tryCandidates(page, step, (loc) =>
+        loc.setInputFiles(files, { timeout }),
+      );
+      return;
+    }
   }
+}
+
+/**
+ * Recreate uploads with placeholder files of the same names — the original
+ * files are not stored in the session (and usually should not be).
+ */
+function placeholderUploadFiles(names: string[]): string[] {
+  const dir = path.join(os.tmpdir(), 'flowscribe-uploads');
+  mkdirSync(dir, { recursive: true });
+  return names.map((name) => {
+    const file = path.join(dir, path.basename(name));
+    if (!existsSync(file)) {
+      writeFileSync(file, `FlowScribe placeholder for "${name}"\n`);
+    }
+    return file;
+  });
 }
 
 /** Try the primary selector, then fall back through recorded candidates. */

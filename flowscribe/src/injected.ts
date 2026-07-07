@@ -202,14 +202,26 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
     };
   };
 
-  /* Selects and checkboxes/radios fire discrete 'change' events. */
+  /* Selects, checkboxes/radios and file inputs fire discrete 'change' events. */
   document.addEventListener(
     'change',
     (e) => {
-      if (!e.isTrusted) return;
       const el = e.target;
       if (!el || !(el instanceof Element)) return;
       const tag = el.tagName.toLowerCase();
+      /* File inputs: accept even synthetic events — apps often proxy uploads
+         through hidden inputs, and automation (setInputFiles) is synthetic. */
+      if (tag === 'input' && el.type === 'file') {
+        const files = Array.from(el.files || []).map((f) => f.name);
+        if (files.length === 0) return;
+        emit(Object.assign({}, baseFor(el, tag), {
+          kind: 'upload',
+          files: files,
+          text: fieldLabel(el) || el.getAttribute('name') || '',
+        }));
+        return;
+      }
+      if (!e.isTrusted) return;
       if (tag === 'select') {
         const opt = el.selectedOptions && el.selectedOptions[0];
         emit(Object.assign({}, baseFor(el, tag), {
@@ -254,6 +266,91 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
           el.getAttribute('name') ||
           '',
       }));
+    },
+    { capture: true },
+  );
+
+  /* HTML5 drag & drop: remember the source at dragstart, emit on drop. */
+  let dragSource = null;
+  document.addEventListener(
+    'dragstart',
+    (e) => {
+      if (!e.isTrusted) return;
+      const raw = e.target;
+      if (!raw || !(raw instanceof Element)) return;
+      const el = raw.closest('[draggable="true"]') || raw;
+      const candidates = selectorCandidates(el);
+      dragSource = {
+        selector: candidates[0] || null,
+        selectorCandidates: candidates,
+        tag: el.tagName.toLowerCase(),
+        text: describe(el),
+      };
+    },
+    { capture: true },
+  );
+  document.addEventListener(
+    'drop',
+    (e) => {
+      if (!e.isTrusted || !dragSource) return;
+      const raw = e.target;
+      if (!raw || !(raw instanceof Element)) return;
+      const targetCandidates = selectorCandidates(raw);
+      emit({
+        kind: 'drag',
+        selector: dragSource.selector,
+        selectorCandidates: dragSource.selectorCandidates,
+        tag: dragSource.tag,
+        text: dragSource.text,
+        targetSelector: targetCandidates[0] || null,
+        targetText: describe(raw),
+        url: location.href,
+      });
+      dragSource = null;
+    },
+    { capture: true },
+  );
+  document.addEventListener(
+    'dragend',
+    () => { dragSource = null; },
+    { capture: true },
+  );
+
+  /* Hover: only when the pointer dwells >=800ms on a hover-worthy element
+     (menus, tooltips). Fleeting mouse travel is ignored. */
+  let hoverTimer = null;
+  let hoverEl = null;
+  let lastHoverEmitted = null;
+  const hoverWorthy = (el) => {
+    try {
+      return el.matches('a, button, summary, [aria-haspopup], [role], [data-hover]');
+    } catch (e) { return false; }
+  };
+  document.addEventListener(
+    'mouseover',
+    (e) => {
+      if (!e.isTrusted) return;
+      const raw = e.target;
+      if (!raw || !(raw instanceof Element)) return;
+      const el = interactiveTarget(raw);
+      if (el === hoverEl) return;
+      hoverEl = el;
+      if (hoverTimer) clearTimeout(hoverTimer);
+      hoverTimer = null;
+      if (!hoverWorthy(el)) return;
+      hoverTimer = setTimeout(() => {
+        if (el === lastHoverEmitted) return;
+        lastHoverEmitted = el;
+        const candidates = selectorCandidates(el);
+        emit({
+          kind: 'hover',
+          selector: candidates[0] || null,
+          selectorCandidates: candidates,
+          tag: el.tagName.toLowerCase(),
+          text: describe(el),
+          url: location.href,
+        });
+      }, 800);
     },
     { capture: true },
   );

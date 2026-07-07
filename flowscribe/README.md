@@ -24,15 +24,16 @@ Only when *you* decide, the recording is handed to **Gemini** to produce polishe
 
 ## Features
 
-- **🖱 Zero-AI recording** — pure Playwright. Clicks, typed text, selects, checkboxes, key presses, and navigations are captured with robust selectors (`data-testid` → `id` → `name`/`aria-label`/`placeholder` → text → CSS path).
+- **🖱 Zero-AI recording** — pure Playwright. Clicks, typed text, selects, checkboxes, key presses, navigations, **hovers** (dwell ≥ 800 ms — captures opened menus), **drag & drop**, and **file uploads** are captured with robust selectors (`data-testid` → `id` → `name`/`aria-label`/`placeholder` → text → CSS path).
 - **📸 Click highlighting** — a red ripple is drawn *in the page* at the click position the instant you click, so every screenshot shows exactly where to click. No image post-processing needed.
 - **🎞 Video export** — the session is recorded as `.webm` via Playwright's built-in video recorder, plus a full Playwright **trace** (`trace.zip`) you can open with `npx playwright show-trace`.
-- **🤖 Gemini-powered guides** — `generate` sends the step list (and optionally the screenshots, with `--vision`) to Gemini and writes a clean step-by-step guide as **Markdown and styled HTML**, with the annotated screenshots embedded — in **as many languages as you want at once** (`--langs en,fr,es,ar`). RTL languages (Arabic, Hebrew, …) get proper `dir="rtl"` HTML.
+- **🤖 Gemini-powered guides** — `generate` sends the step list (and optionally the screenshots, with `--vision`) to Gemini and writes a clean step-by-step guide as **Markdown and styled HTML** (add `--pdf` for a print-ready **PDF**), with the annotated screenshots embedded — in **as many languages as you want at once** (`--langs en,fr,es,ar`). RTL languages (Arabic, Hebrew, …) get proper `dir="rtl"` HTML.
 - **🧪 Flow → test** — `export-test` converts the recording into a runnable `@playwright/test` spec (navigations become URL assertions), and `replay` re-executes the flow live with selector-fallback so Playwright can "do it himself" as a smoke test.
 - **🩹 Self-healing replays** — when the app's UI changes and a selector breaks, `replay` digests the live page's interactive elements, asks Gemini which one the step really targeted, retries, and **writes the repaired selector back** to `session.json` (original backed up). Your recorded tests fix themselves.
 - **✅ AI-suggested assertions** — `assert` has Gemini propose outcome-proving checks ("after clicking Sign in, 'Welcome back!' is visible"), grounded in the screenshots so it only asserts what it can see. They run on every `replay` and are baked into `export-test` specs — turning replays into real regression tests.
 - **✎ Step editor** — `edit` serves a local web UI (zero dependencies, no AI) to review the recording with its screenshots: delete misclicks, reorder steps, fix labels, redact values, prune assertions — then save before generating anything.
-- **🎙 How-to video narration** — `narrate` asks Gemini for a voiceover script timed to your recording's real timestamps, and writes both a read-aloud script and an **`.srt` subtitle file** — record your video and just read along.
+- **🎙 How-to video narration** — `narrate` asks Gemini for a voiceover script timed to your recording's real timestamps, and writes both a read-aloud script and an **`.srt` subtitle file** — record your video and just read along. Add `--tts` for a **synthesized voiceover** (Gemini TTS → `.wav`) and `--mux` to lay it over the session video with ffmpeg: a finished, narrated how-to video with zero human recording.
+- **📡 Monitoring mode** — `monitor` replays the flow on an interval ("does checkout still work?"), logs every run to `monitor.log`, and POSTs a JSON report to your webhook (Slack, n8n, anything) when a run fails or self-heals.
 - **🔐 Access handling** — pass `--user/--pass` for HTTP basic auth; form logins are simply recorded like any other steps (passwords are masked in guides and narration, never sent to the AI).
 
 ## Install
@@ -95,14 +96,23 @@ When a replay heals a selector, the fix is saved back to `session.json` (the ori
 ### 5. Narrated how-to video
 
 ```bash
-npm run narrate -- -s sessions/checkout --lang en
+npm run narrate -- -s sessions/checkout --lang en                 # script + .srt
+npm run narrate -- -s sessions/checkout --lang en --mux --voice Kore
 ```
 
-Writes `narration/narration.en.md` (read-aloud script with timestamps) and `narration/narration.en.srt` (subtitles you can burn into the exported video with ffmpeg):
+Writes `narration/narration.en.md` (read-aloud script with timestamps) and `narration/narration.en.srt`. With `--tts` you also get `narration.en.wav` (Gemini TTS voiceover), and `--mux` lays that audio over the session video into `howto.en.webm` (requires an ffmpeg with audio encoders on your PATH or `FFMPEG_PATH`). Burn subtitles in with:
 
 ```bash
-ffmpeg -i sessions/checkout/video/*.webm -vf subtitles=sessions/checkout/narration/narration.en.srt howto.mp4
+ffmpeg -i sessions/checkout/narration/howto.en.webm -vf subtitles=sessions/checkout/narration/narration.en.srt howto.mp4
 ```
+
+### 6. Keep watching it (synthetic monitoring)
+
+```bash
+npm run cli -- monitor -s sessions/checkout --interval 15m --webhook https://hooks.example.com/alerts
+```
+
+Replays the flow every 15 minutes headless, appends every run to `sessions/checkout/monitor.log`, and POSTs a JSON report to the webhook whenever a run fails — or silently self-heals a broken selector.
 
 ### Inspect a session
 
@@ -120,7 +130,10 @@ npm run cli -- info -s sessions/checkout
 - [x] Interactive step editor before generation (`flowscribe edit`)
 - [x] Gemini-suggested assertions in exported tests (`flowscribe assert`)
 - [x] Self-healing replays (broken selectors repaired by Gemini)
-- [ ] Hover / drag / file-upload capture
-- [ ] Voice synthesis (TTS) of the narration script
-- [ ] PDF / DOCX guide export
-- [ ] Scheduled monitoring mode (run flows on a cron, alert on failure)
+- [x] Hover / drag / file-upload capture
+- [x] Voice synthesis (TTS) of the narration script (`narrate --tts/--mux`)
+- [x] PDF guide export (`generate --pdf`)
+- [x] Monitoring mode (`flowscribe monitor` — interval replays + webhook alerts)
+- [ ] DOCX guide export
+- [ ] Per-cue TTS timing (align audio precisely to each subtitle cue)
+- [ ] Chrome extension recorder (record in your own logged-in browser)

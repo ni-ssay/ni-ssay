@@ -32,10 +32,41 @@
     <button type="submit" data-testid="login-button">Sign in</button>
   </form>
   <div id="status"></div>
+
+  <h2>Extras</h2>
+  <div id="menu-wrap" style="position:relative; display:inline-block">
+    <button id="menu-button" aria-haspopup="true" type="button">Products ▾</button>
+    <div id="menu-list" hidden style="position:absolute; top:100%; left:0; border:1px solid #ccc; padding:.5rem; background:#fafafa; z-index:5">
+      <a href="#docs" id="menu-item-docs">Documentation</a>
+    </div>
+  </div>
+
+  <div style="margin-top:1rem; display:flex; gap:1rem">
+    <div id="drag-me" draggable="true" style="padding:.6rem; border:1px solid #888; cursor:grab">Drag me</div>
+    <div id="drop-zone" style="padding:.6rem; border:2px dashed #888; min-width:8rem">Drop here</div>
+  </div>
+
+  <label style="margin-top:1rem">Attachment
+    <input type="file" name="attachment" id="attachment">
+  </label>
+
   <script>
     document.getElementById('login-form').addEventListener('submit', (e) => {
       e.preventDefault();
       document.getElementById('status').textContent = 'Welcome back!';
+    });
+    const wrap = document.getElementById('menu-wrap');
+    const list = document.getElementById('menu-list');
+    document.getElementById('menu-button').addEventListener('mouseenter', () => { list.hidden = false; });
+    wrap.addEventListener('mouseleave', () => { list.hidden = true; });
+
+    const dragMe = document.getElementById('drag-me');
+    const dropZone = document.getElementById('drop-zone');
+    dragMe.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'x'));
+    dropZone.addEventListener('dragover', (e) => e.preventDefault());
+    dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropZone.textContent = 'Dropped!';
     });
   </script>
 </body>

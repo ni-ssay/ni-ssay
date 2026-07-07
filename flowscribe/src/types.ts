@@ -5,7 +5,10 @@ export type StepType =
   | 'fill'
   | 'select'
   | 'check'
-  | 'press';
+  | 'press'
+  | 'hover'
+  | 'drag'
+  | 'upload';
 
 export interface RecordedStep {
   index: number;
@@ -30,6 +33,12 @@ export interface RecordedStep {
   checked?: boolean;
   /** Viewport coordinates of the click. */
   coords?: { x: number; y: number };
+  /** Drop-target selector (for `drag` steps). */
+  targetSelector?: string;
+  /** Drop-target visible text (for `drag` steps). */
+  targetText?: string;
+  /** Names of uploaded files (for `upload` steps). */
+  files?: string[];
   /** Screenshot filename (relative to the session directory). */
   screenshot?: string;
   /** True for sensitive inputs (passwords) — mask when generating guides. */

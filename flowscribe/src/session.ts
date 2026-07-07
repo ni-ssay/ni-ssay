@@ -35,6 +35,16 @@ export function describeStep(step: RecordedStep): string {
       return `${step.checked ? 'Check' : 'Uncheck'} the ${label || 'checkbox'}`;
     case 'press':
       return `Press the ${step.key} key`;
+    case 'hover':
+      return `Hover over the ${label || step.selector} element`;
+    case 'drag':
+      return `Drag ${label || step.selector} and drop it onto ${
+        step.targetText ? `"${step.targetText.slice(0, 60)}"` : step.targetSelector
+      }`;
+    case 'upload':
+      return `Upload ${
+        step.files?.length ? step.files.map((f) => `"${f}"`).join(', ') : 'a file'
+      } using the ${label || 'file'} field`;
   }
 }
 

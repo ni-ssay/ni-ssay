@@ -1,6 +1,8 @@
+import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { geminiGenerate, parseJsonResponse } from './gemini.js';
+import { geminiGenerate, geminiTts, parseJsonResponse } from './gemini.js';
 import { languageName } from './generator.js';
 import { loadSession, stepsAsText } from './session.js';
 
@@ -8,6 +10,12 @@ export interface NarrateOptions {
   sessionDir: string;
   lang: string;
   model?: string;
+  /** Also synthesize the narration as audio (Gemini TTS → .wav). */
+  tts?: boolean;
+  /** Prebuilt Gemini voice name for TTS. */
+  voice?: string;
+  /** Mux the TTS audio onto the recorded session video (needs ffmpeg). */
+  mux?: boolean;
 }
 
 interface Cue {
@@ -90,8 +98,78 @@ export async function narrate(opts: NarrateOptions): Promise<string[]> {
   ].join('\n');
   const mdFile = path.join(outDir, `narration.${opts.lang}.md`);
   await writeFile(mdFile, md, 'utf8');
+  const outputs = [mdFile, srtFile];
 
-  return [mdFile, srtFile];
+  if (opts.tts || opts.mux) {
+    console.log('Synthesizing narration audio with Gemini TTS...');
+    const wav = await geminiTts({
+      text:
+        'Read the following tutorial narration in a clear, friendly voice, ' +
+        'with a short pause between paragraphs:\n\n' +
+        cues.map((c) => c.line).join('\n\n'),
+      voice: opts.voice,
+    });
+    const wavFile = path.join(outDir, `narration.${opts.lang}.wav`);
+    await writeFile(wavFile, wav);
+    outputs.push(wavFile);
+
+    if (opts.mux) {
+      const video = session.videos[0]
+        ? path.join(sessionDir, session.videos[0])
+        : null;
+      if (!video || !existsSync(video)) {
+        console.warn('No session video found — skipping mux.');
+      } else {
+        const muxFile = path.join(outDir, `howto.${opts.lang}.webm`);
+        const muxed = await muxAudio(video, wavFile, srtFile, muxFile);
+        if (muxed) outputs.push(muxFile);
+      }
+    }
+  }
+
+  return outputs;
+}
+
+/**
+ * Mux the narration audio (and soft subtitles when the container allows)
+ * onto the session video using ffmpeg. Playwright's bundled ffmpeg has no
+ * audio encoders, so a real ffmpeg is required (FFMPEG_PATH or on PATH);
+ * otherwise the exact command is printed for the user to run elsewhere.
+ */
+async function muxAudio(
+  video: string,
+  wav: string,
+  srt: string,
+  out: string,
+): Promise<boolean> {
+  const ffmpeg = process.env.FFMPEG_PATH || 'ffmpeg';
+  const args = [
+    '-y',
+    '-i', video,
+    '-i', wav,
+    '-map', '0:v', '-map', '1:a',
+    '-c:v', 'copy', '-c:a', 'libopus',
+    '-shortest',
+    out,
+  ];
+  const ok = await new Promise<boolean>((resolve) => {
+    const proc = spawn(ffmpeg, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d: Buffer) => (stderr += d.toString()));
+    proc.on('error', () => resolve(false));
+    proc.on('close', (code) => {
+      if (code !== 0) console.warn(stderr.split('\n').slice(-4).join('\n'));
+      resolve(code === 0);
+    });
+  });
+  if (!ok) {
+    console.warn(
+      '\nffmpeg with audio support not found (or mux failed). Run this yourself:\n' +
+        `  ffmpeg -i "${video}" -i "${wav}" -map 0:v -map 1:a -c:v copy -shortest "${out}"\n` +
+        `  # burn subtitles too: add  -vf "subtitles=${srt}"  (re-encodes video)`,
+    );
+  }
+  return ok;
 }
 
 function msToSrt(ms: number): string {

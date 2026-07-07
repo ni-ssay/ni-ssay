@@ -86,6 +86,22 @@ function stepToCode(step: RecordedStep): string[] | null {
         return [`await page.locator(${q(step.selector)}).first().press(${q(step.key ?? 'Enter')});`];
       }
       return [`await page.keyboard.press(${q(step.key ?? 'Enter')});`];
+    case 'hover':
+      if (!step.selector) return null;
+      return [`await page.locator(${q(step.selector)}).first().hover();`];
+    case 'drag':
+      if (!step.selector || !step.targetSelector) return null;
+      return [
+        `await page.locator(${q(step.selector)}).first().dragTo(page.locator(${q(step.targetSelector)}).first());`,
+      ];
+    case 'upload':
+      if (!step.selector || !step.files?.length) return null;
+      return [
+        `// TODO: point these at real files before running in CI`,
+        `await page.locator(${q(step.selector)}).first().setInputFiles([${step.files
+          .map((f) => q(f))
+          .join(', ')}]);`,
+      ];
     default:
       return null;
   }

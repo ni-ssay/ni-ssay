@@ -39,6 +39,9 @@ interface EmitPayload {
   masked?: boolean;
   x?: number;
   y?: number;
+  targetSelector?: string | null;
+  targetText?: string;
+  files?: string[];
   url: string;
 }
 
@@ -117,18 +120,36 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
       select: 'select',
       check: 'check',
       press: 'press',
+      hover: 'hover',
+      drag: 'drag',
+      upload: 'upload',
     };
     const type = kindToType[p.kind];
     if (!type) return;
 
+    const last = session.steps[session.steps.length - 1];
+
     // Collapse repeated fills on the same field: keep only the final value.
     if (type === 'fill') {
-      const last = session.steps[session.steps.length - 1];
       if (last && last.type === 'fill' && last.selector === p.selector) {
         last.value = p.value;
         last.timeOffsetMs = Date.now() - startedAtMs;
         return;
       }
+    }
+    // Consecutive hovers on the same element are one hover.
+    if (type === 'hover' && last?.type === 'hover' && last.selector === p.selector) {
+      return;
+    }
+    // "Hover X" immediately followed by "click X" is just the click.
+    if (type === 'click' && last?.type === 'hover' && last.selector === p.selector) {
+      session.steps.pop();
+      stepIndex--;
+    }
+    // A drag's mouse-down registers as a click on the source — drop it.
+    if (type === 'drag' && last?.type === 'click' && last.selector === p.selector) {
+      session.steps.pop();
+      stepIndex--;
     }
 
     const step = addStep({
@@ -143,11 +164,14 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
       checked: p.checked,
       masked: p.masked,
       coords: p.x !== undefined && p.y !== undefined ? { x: p.x, y: p.y } : undefined,
+      targetSelector: p.targetSelector ?? undefined,
+      targetText: p.targetText,
+      files: p.files,
     });
 
-    if (type === 'click') {
-      // The in-page ripple is drawn synchronously on pointerdown, so a
-      // screenshot taken now shows the highlight over the clicked spot.
+    if (type === 'click' || type === 'hover' || type === 'drag') {
+      // Clicks show the in-page ripple (drawn synchronously on pointerdown);
+      // hover shots capture opened menus, drag shots the dropped state.
       captureScreenshot(page, step);
     }
   };

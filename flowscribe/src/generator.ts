@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { marked } from 'marked';
+import { chromium } from 'playwright';
 import { geminiGenerate, type GeminiImage } from './gemini.js';
 import { loadSession, stepsAsText } from './session.js';
 
@@ -10,6 +12,8 @@ export interface GenerateOptions {
   langs: string[];
   /** Also send the click screenshots to Gemini for richer descriptions. */
   vision?: boolean;
+  /** Also render each guide as a PDF (uses headless Chromium, no AI). */
+  pdf?: boolean;
   model?: string;
 }
 
@@ -121,8 +125,34 @@ export async function generateGuides(opts: GenerateOptions): Promise<string[]> {
     const htmlFile = path.join(guideDir, `guide.${lang}.html`);
     await writeFile(htmlFile, await renderHtml(markdown, lang), 'utf8');
     written.push(htmlFile);
+
+    if (opts.pdf) {
+      const pdfFile = path.join(guideDir, `guide.${lang}.pdf`);
+      await renderPdf(htmlFile, pdfFile);
+      written.push(pdfFile);
+    }
   }
   return written;
+}
+
+/** Print the HTML guide to PDF with headless Chromium (no AI, no extra deps). */
+export async function renderPdf(htmlFile: string, pdfFile: string): Promise<void> {
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.FLOWSCRIBE_CHROMIUM || undefined,
+  });
+  try {
+    const page = await browser.newPage();
+    await page.goto(pathToFileURL(htmlFile).href, { waitUntil: 'networkidle' });
+    await page.pdf({
+      path: pdfFile,
+      format: 'A4',
+      printBackground: true,
+      margin: { top: '15mm', bottom: '15mm', left: '13mm', right: '13mm' },
+    });
+  } finally {
+    await browser.close().catch(() => {});
+  }
 }
 
 async function renderHtml(markdown: string, lang: string): Promise<string> {
