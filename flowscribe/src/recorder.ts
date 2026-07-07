@@ -60,19 +60,50 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
   await mkdir(shotsDir, { recursive: true });
   await mkdir(videoDir, { recursive: true });
 
-  const fixedViewport = opts.viewport ?? null;
-
   const browser = await chromium.launch({
     headless: opts.headless ?? false,
     executablePath: process.env.FLOWSCRIBE_CHROMIUM || undefined,
-    // With no fixed viewport the window opens maximized and the page uses
-    // all of it — a fixed viewport letterboxes the app into a corner.
-    args: fixedViewport ? [] : ['--start-maximized'],
+    // Without a user-fixed viewport the window opens maximized and we match
+    // the page to it exactly (see the probe below).
+    args: opts.viewport ? [] : ['--start-maximized'],
   });
+
+  // Playwright renders emulated pages at device-scale-factor 1, so on
+  // high-DPI displays (e.g. Windows at 125%) the page paints smaller than
+  // the window, leaving dead bands right/bottom. Probe the real maximized
+  // window size AND devicePixelRatio, then emulate exactly that — the page
+  // fills the window pixel-perfectly and video recording keeps working.
+  let viewport = opts.viewport ?? null;
+  let deviceScaleFactor: number | undefined;
+  if (!viewport) {
+    const probe = await browser.newContext({ viewport: null });
+    try {
+      const p = await probe.newPage();
+      const m = (await p.evaluate(
+        '({ width: window.innerWidth, height: window.innerHeight, dpr: window.devicePixelRatio })',
+      )) as { width: number; height: number; dpr: number } | null;
+      if (m && m.width >= 320 && m.height >= 240) {
+        viewport = { width: m.width, height: m.height };
+        if (m.dpr && Math.abs(m.dpr - 1) > 0.01) deviceScaleFactor = m.dpr;
+      }
+    } catch {
+      /* fall back to Playwright defaults */
+    } finally {
+      await probe.close().catch(() => {});
+    }
+  }
+
+  const even = (n: number) => Math.max(2, 2 * Math.round(n / 2));
+  const videoScale = viewport ? Math.min(1, 1280 / viewport.width) : 1;
+  const videoSize = viewport
+    ? { width: even(viewport.width * videoScale), height: even(viewport.height * videoScale) }
+    : { width: 1280, height: 720 };
+
   const context = await browser.newContext({
-    viewport: fixedViewport,
+    viewport,
+    ...(viewport && deviceScaleFactor ? { deviceScaleFactor } : {}),
     // Video frames are scaled to fit; the page itself stays full-window.
-    recordVideo: { dir: videoDir, size: fixedViewport ?? { width: 1280, height: 720 } },
+    recordVideo: { dir: videoDir, size: videoSize },
     httpCredentials:
       opts.user && opts.pass
         ? { username: opts.user, password: opts.pass }
@@ -86,7 +117,7 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
     name: opts.name ?? `session-${new Date(startedAtMs).toISOString().replace(/[:.]/g, '-')}`,
     startUrl: opts.url,
     startedAt: new Date(startedAtMs).toISOString(),
-    viewport: fixedViewport ?? { width: 1280, height: 720 },
+    viewport: viewport ?? { width: 1280, height: 720 },
     steps: [],
     videos: [],
   };
@@ -204,7 +235,7 @@ export async function record(opts: RecordOptions): Promise<RecordingHandle> {
       if (!session.appTitle) {
         session.appTitle = await page.title().catch(() => undefined);
       }
-      if (!fixedViewport && pages.length === 1) {
+      if (!opts.viewport && pages.length === 1) {
         // Record the real full-window size so replays match what was seen.
         const size = await page
           .evaluate('({ width: window.innerWidth, height: window.innerHeight })')

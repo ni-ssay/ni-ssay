@@ -396,8 +396,10 @@ const UI_HTML = `<!doctype html>
     --shadow: 0 1px 3px rgba(16,18,24,.08), 0 4px 14px rgba(16,18,24,.05);
     --link: #2563eb;
   }
+  /* Dark tokens apply when the system prefers dark (unless the user forced
+     light) or when the user forced dark with the header toggle. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #0e0f13;
       --card: #17181e;
       --text: #e9eaee;
@@ -416,6 +418,26 @@ const UI_HTML = `<!doctype html>
       --link: #7aa2ff;
     }
   }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0e0f13;
+    --card: #17181e;
+    --text: #e9eaee;
+    --muted: #9298a3;
+    --border: #262832;
+    --border-strong: #363945;
+    --btn: #1f2129;
+    --btn-hover: #272a34;
+    --field: #1c1e26;
+    --panel: #1c1e25;
+    --accent: #ff453a;
+    --accent-soft: #3a1512;
+    --ok: #34c759;
+    --warn: #ffb340;
+    --shadow: 0 1px 3px rgba(0,0,0,.5);
+    --link: #7aa2ff;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
 
   * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
@@ -513,6 +535,7 @@ const UI_HTML = `<!doctype html>
     <div class="sub">record → guide → test → video, all local</div>
   </div>
   <div id="keyState"></div>
+  <button id="themeBtn" class="small" title="Theme"></button>
 </header>
 <main>
   <div id="recBanner">
@@ -628,6 +651,23 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
 });
 document.getElementById('recUrl').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') document.getElementById('startBtn').click();
+});
+
+// Theme toggle: Auto (follow system) → Light → Dark, remembered locally.
+const THEMES = ['auto', 'light', 'dark'];
+const THEME_LABELS = { auto: '🌗 Auto', light: '☀️ Light', dark: '🌙 Dark' };
+function applyTheme(theme) {
+  if (theme === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme;
+  document.getElementById('themeBtn').textContent = THEME_LABELS[theme];
+}
+let currentTheme = localStorage.getItem('fsTheme') || 'auto';
+if (!THEMES.includes(currentTheme)) currentTheme = 'auto';
+applyTheme(currentTheme);
+document.getElementById('themeBtn').addEventListener('click', () => {
+  currentTheme = THEMES[(THEMES.indexOf(currentTheme) + 1) % THEMES.length];
+  localStorage.setItem('fsTheme', currentTheme);
+  applyTheme(currentTheme);
 });
 
 function renderSessions() {
