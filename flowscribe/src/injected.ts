@@ -125,28 +125,69 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
     return found || el;
   };
 
-  /* Draw a click highlight ripple so screenshots show where the user clicked. */
-  const highlight = (x, y) => {
+  /* Only one highlight at a time — otherwise fast consecutive clicks
+     bleed into the next step's screenshot. */
+  const clearHighlights = () => {
+    document
+      .querySelectorAll('[data-flowscribe="highlight"]')
+      .forEach((n) => n.remove());
+  };
+
+  const addOverlay = (css) => {
+    const node = document.createElement('div');
+    node.setAttribute('data-flowscribe', 'highlight');
+    node.style.cssText = css + ';pointer-events:none;z-index:2147483647;';
+    document.documentElement.appendChild(node);
+    setTimeout(() => node.remove(), 1600);
+    return node;
+  };
+
+  /* Outline the target element itself (rounded box hugging its bounds).
+     Returns false when the element is unsuitable (invisible or covering
+     most of the viewport, e.g. a click on the page background). */
+  const outlineElement = (el) => {
     try {
-      /* Only one ring at a time — otherwise fast consecutive clicks
-         bleed into the next step's screenshot. */
-      document
-        .querySelectorAll('[data-flowscribe="highlight"]')
-        .forEach((n) => n.remove());
-      const ring = document.createElement('div');
-      ring.setAttribute('data-flowscribe', 'highlight');
-      ring.style.cssText =
-        'position:fixed;left:' + (x - 22) + 'px;top:' + (y - 22) + 'px;' +
-        'width:44px;height:44px;border:4px solid #ff3b30;border-radius:50%;' +
-        'box-shadow:0 0 0 4px rgba(255,59,48,0.35),0 0 18px rgba(255,59,48,0.6);' +
-        'background:rgba(255,59,48,0.12);pointer-events:none;z-index:2147483647;';
-      const dot = document.createElement('div');
-      dot.style.cssText =
-        'position:absolute;left:50%;top:50%;width:8px;height:8px;' +
-        'margin:-4px 0 0 -4px;border-radius:50%;background:#ff3b30;';
-      ring.appendChild(dot);
-      document.documentElement.appendChild(ring);
-      setTimeout(() => ring.remove(), 1600);
+      const r = el.getBoundingClientRect();
+      if (!r || r.width < 2 || r.height < 2) return false;
+      if (r.width * r.height > window.innerWidth * window.innerHeight * 0.6) return false;
+      addOverlay(
+        'position:fixed;left:' + (r.left - 5) + 'px;top:' + (r.top - 5) + 'px;' +
+        'width:' + (r.width + 10) + 'px;height:' + (r.height + 10) + 'px;' +
+        'border:3px solid #ff3b30;border-radius:10px;' +
+        'box-shadow:0 0 0 3px rgba(255,59,48,0.25),0 0 16px rgba(255,59,48,0.5);' +
+        'background:rgba(255,59,48,0.06)',
+      );
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  /* Highlight a click: outline the element + a dot at the exact click
+     point; fall back to the classic ripple ring when no box fits. */
+  const highlight = (x, y, el) => {
+    try {
+      clearHighlights();
+      const boxed = el ? outlineElement(el) : false;
+      if (boxed) {
+        addOverlay(
+          'position:fixed;left:' + (x - 7) + 'px;top:' + (y - 7) + 'px;' +
+          'width:14px;height:14px;border-radius:50%;background:#ff3b30;' +
+          'border:3px solid #fff;box-shadow:0 0 8px rgba(255,59,48,0.8)',
+        );
+      } else {
+        const ring = addOverlay(
+          'position:fixed;left:' + (x - 22) + 'px;top:' + (y - 22) + 'px;' +
+          'width:44px;height:44px;border:4px solid #ff3b30;border-radius:50%;' +
+          'box-shadow:0 0 0 4px rgba(255,59,48,0.35),0 0 18px rgba(255,59,48,0.6);' +
+          'background:rgba(255,59,48,0.12)',
+        );
+        const dot = document.createElement('div');
+        dot.style.cssText =
+          'position:absolute;left:50%;top:50%;width:8px;height:8px;' +
+          'margin:-4px 0 0 -4px;border-radius:50%;background:#ff3b30;';
+        ring.appendChild(dot);
+      }
     } catch (e) {
       /* ignore */
     }
@@ -159,9 +200,9 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
       const raw = e.target;
       if (!raw || !(raw instanceof Element)) return;
       const el = interactiveTarget(raw);
-      /* Draw the ripple synchronously so the screenshot taken from Node
+      /* Draw the highlight synchronously so the screenshot taken from Node
          (a few ms later) captures it. */
-      highlight(e.clientX, e.clientY);
+      highlight(e.clientX, e.clientY, el);
       const x = Math.round(e.clientX);
       const y = Math.round(e.clientY);
       const url = location.href;
@@ -361,6 +402,10 @@ export const INJECTED_RECORDER_SOURCE = String.raw`(() => {
       hoverTimer = setTimeout(() => {
         if (el === lastHoverEmitted) return;
         lastHoverEmitted = el;
+        /* Outline the hovered element so the screenshot shows what opened
+           the menu/tooltip. */
+        clearHighlights();
+        outlineElement(el);
         const candidates = selectorCandidates(el);
         emit({
           kind: 'hover',
