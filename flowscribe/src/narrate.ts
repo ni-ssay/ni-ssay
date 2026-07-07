@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { geminiGenerate, geminiTts, parseJsonResponse } from './gemini.js';
+import { geminiGenerate, geminiTtsPcm, parseJsonResponse, pcmToWav } from './gemini.js';
 import { languageName } from './generator.js';
 import { loadSession, stepsAsText } from './session.js';
 
@@ -101,17 +101,37 @@ export async function narrate(opts: NarrateOptions): Promise<string[]> {
   const outputs = [mdFile, srtFile];
 
   if (opts.tts || opts.mux) {
-    console.log('Synthesizing narration audio with Gemini TTS...');
-    const wav = await geminiTts({
-      text:
-        'Read the following tutorial narration in a clear, friendly voice, ' +
-        'with a short pause between paragraphs:\n\n' +
-        cues.map((c) => c.line).join('\n\n'),
-      voice: opts.voice,
-    });
+    // Per-cue synthesis so each spoken line lands exactly at its timestamp.
+    const pcms: Buffer[] = [];
+    let rate = 24000;
+    for (let i = 0; i < cues.length; i++) {
+      console.log(`Synthesizing cue ${i + 1}/${cues.length} with Gemini TTS...`);
+      const res = await geminiTtsPcm({
+        text:
+          'Read this single tutorial narration line in a clear, friendly voice: ' +
+          cues[i].line,
+        voice: opts.voice,
+      });
+      pcms.push(res.pcm);
+      rate = res.rate;
+    }
+    const { pcm, placements } = assembleAlignedPcm(
+      cues.map((c, i) => ({ startMs: c.startMs, pcm: pcms[i] })),
+      rate,
+    );
     const wavFile = path.join(outDir, `narration.${opts.lang}.wav`);
-    await writeFile(wavFile, wav);
+    await writeFile(wavFile, pcmToWav(pcm, rate));
     outputs.push(wavFile);
+
+    // Re-time the subtitles to the actual audio placement so the .srt
+    // matches the synthesized voice exactly.
+    const srtAligned = cues
+      .map(
+        (c, i) =>
+          `${i + 1}\n${msToSrt(placements[i].startMs)} --> ${msToSrt(placements[i].endMs)}\n${c.line}\n`,
+      )
+      .join('\n');
+    await writeFile(srtFile, srtAligned, 'utf8');
 
     if (opts.mux) {
       const video = session.videos[0]
@@ -128,6 +148,40 @@ export async function narrate(opts: NarrateOptions): Promise<string[]> {
   }
 
   return outputs;
+}
+
+/**
+ * Lay per-cue PCM clips onto a single silent-padded track so each clip
+ * starts at (or as close as possible after) its cue's timestamp.
+ * Returns the combined PCM and where each cue actually landed.
+ */
+export function assembleAlignedPcm(
+  cues: Array<{ startMs: number; pcm: Buffer }>,
+  rate: number,
+): { pcm: Buffer; placements: Array<{ startMs: number; endMs: number }> } {
+  const bytesPerMs = (rate * 2) / 1000; // 16-bit mono
+  const chunks: Buffer[] = [];
+  const placements: Array<{ startMs: number; endMs: number }> = [];
+  let cursorBytes = 0;
+
+  for (const cue of cues) {
+    const cursorMs = cursorBytes / bytesPerMs;
+    const gapMs = cue.startMs - cursorMs;
+    if (gapMs > 0) {
+      // Round to a whole sample so the stream stays 16-bit aligned.
+      const gapBytes = 2 * Math.round((gapMs * bytesPerMs) / 2);
+      chunks.push(Buffer.alloc(gapBytes));
+      cursorBytes += gapBytes;
+    }
+    const startMs = cursorBytes / bytesPerMs;
+    chunks.push(cue.pcm);
+    cursorBytes += cue.pcm.length;
+    placements.push({
+      startMs: Math.round(startMs),
+      endMs: Math.round(cursorBytes / bytesPerMs),
+    });
+  }
+  return { pcm: Buffer.concat(chunks), placements };
 }
 
 /**

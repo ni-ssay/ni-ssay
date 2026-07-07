@@ -14,6 +14,8 @@ export interface GenerateOptions {
   vision?: boolean;
   /** Also render each guide as a PDF (uses headless Chromium, no AI). */
   pdf?: boolean;
+  /** Also render each guide as a Word .docx document (no AI). */
+  docx?: boolean;
   model?: string;
 }
 
@@ -130,6 +132,13 @@ export async function generateGuides(opts: GenerateOptions): Promise<string[]> {
       const pdfFile = path.join(guideDir, `guide.${lang}.pdf`);
       await renderPdf(htmlFile, pdfFile);
       written.push(pdfFile);
+    }
+
+    if (opts.docx) {
+      const { renderDocx } = await import('./docx.js');
+      const docxFile = path.join(guideDir, `guide.${lang}.docx`);
+      await renderDocx(markdown, guideDir, docxFile);
+      written.push(docxFile);
     }
   }
   return written;

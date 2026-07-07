@@ -27,12 +27,13 @@ Only when *you* decide, the recording is handed to **Gemini** to produce polishe
 - **🖱 Zero-AI recording** — pure Playwright. Clicks, typed text, selects, checkboxes, key presses, navigations, **hovers** (dwell ≥ 800 ms — captures opened menus), **drag & drop**, and **file uploads** are captured with robust selectors (`data-testid` → `id` → `name`/`aria-label`/`placeholder` → text → CSS path).
 - **📸 Click highlighting** — a red ripple is drawn *in the page* at the click position the instant you click, so every screenshot shows exactly where to click. No image post-processing needed.
 - **🎞 Video export** — the session is recorded as `.webm` via Playwright's built-in video recorder, plus a full Playwright **trace** (`trace.zip`) you can open with `npx playwright show-trace`.
-- **🤖 Gemini-powered guides** — `generate` sends the step list (and optionally the screenshots, with `--vision`) to Gemini and writes a clean step-by-step guide as **Markdown and styled HTML** (add `--pdf` for a print-ready **PDF**), with the annotated screenshots embedded — in **as many languages as you want at once** (`--langs en,fr,es,ar`). RTL languages (Arabic, Hebrew, …) get proper `dir="rtl"` HTML.
+- **🤖 Gemini-powered guides** — `generate` sends the step list (and optionally the screenshots, with `--vision`) to Gemini and writes a clean step-by-step guide as **Markdown and styled HTML** (add `--pdf` for a print-ready **PDF**, `--docx` for a **Word document** — screenshots embedded in both) — in **as many languages as you want at once** (`--langs en,fr,es,ar`). RTL languages (Arabic, Hebrew, …) get proper `dir="rtl"` HTML.
 - **🧪 Flow → test** — `export-test` converts the recording into a runnable `@playwright/test` spec (navigations become URL assertions), and `replay` re-executes the flow live with selector-fallback so Playwright can "do it himself" as a smoke test.
 - **🩹 Self-healing replays** — when the app's UI changes and a selector breaks, `replay` digests the live page's interactive elements, asks Gemini which one the step really targeted, retries, and **writes the repaired selector back** to `session.json` (original backed up). Your recorded tests fix themselves.
 - **✅ AI-suggested assertions** — `assert` has Gemini propose outcome-proving checks ("after clicking Sign in, 'Welcome back!' is visible"), grounded in the screenshots so it only asserts what it can see. They run on every `replay` and are baked into `export-test` specs — turning replays into real regression tests.
 - **✎ Step editor** — `edit` serves a local web UI (zero dependencies, no AI) to review the recording with its screenshots: delete misclicks, reorder steps, fix labels, redact values, prune assertions — then save before generating anything.
-- **🎙 How-to video narration** — `narrate` asks Gemini for a voiceover script timed to your recording's real timestamps, and writes both a read-aloud script and an **`.srt` subtitle file** — record your video and just read along. Add `--tts` for a **synthesized voiceover** (Gemini TTS → `.wav`) and `--mux` to lay it over the session video with ffmpeg: a finished, narrated how-to video with zero human recording.
+- **🎙 How-to video narration** — `narrate` asks Gemini for a voiceover script timed to your recording's real timestamps, and writes both a read-aloud script and an **`.srt` subtitle file** — record your video and just read along. Add `--tts` for a **synthesized voiceover**: each cue is voiced separately with Gemini TTS and placed on a silence-padded track **exactly at its timestamp** (the `.srt` is re-timed to match the audio), and `--mux` lays it over the session video with ffmpeg: a finished, narrated how-to video with zero human recording.
+- **🧩 Chrome extension recorder** — record in **your own logged-in browser** (real profile, real sessions) with the `extension/` MV3 extension: same capture engine, click highlights, and screenshots. Export a `.flowscribe.json` from the popup and run `flowscribe import` — every other command (generate, edit, assert, replay, export-test, narrate, monitor) works on it.
 - **📡 Monitoring mode** — `monitor` replays the flow on an interval ("does checkout still work?"), logs every run to `monitor.log`, and POSTs a JSON report to your webhook (Slack, n8n, anything) when a run fails or self-heals.
 - **🔐 Access handling** — pass `--user/--pass` for HTTP basic auth; form logins are simply recorded like any other steps (passwords are masked in guides and narration, never sent to the AI).
 
@@ -106,6 +107,19 @@ Writes `narration/narration.en.md` (read-aloud script with timestamps) and `narr
 ffmpeg -i sessions/checkout/narration/howto.en.webm -vf subtitles=sessions/checkout/narration/narration.en.srt howto.mp4
 ```
 
+### Recording in your own browser (Chrome extension)
+
+1. Open `chrome://extensions`, enable Developer mode, click **Load unpacked**, and pick the `extension/` folder.
+2. Navigate to your app, click the FlowScribe icon → **Start recording**, do your flow, **Stop**, **Export**.
+3. Back in the terminal:
+
+```bash
+npm run cli -- import ~/Downloads/ext-2026-01-01.flowscribe.json -o sessions/from-browser
+npm run generate -- -s sessions/from-browser --langs en,fr
+```
+
+(The extension records steps + screenshots; video and trace need the Playwright recorder.)
+
 ### 6. Keep watching it (synthetic monitoring)
 
 ```bash
@@ -131,9 +145,9 @@ npm run cli -- info -s sessions/checkout
 - [x] Gemini-suggested assertions in exported tests (`flowscribe assert`)
 - [x] Self-healing replays (broken selectors repaired by Gemini)
 - [x] Hover / drag / file-upload capture
-- [x] Voice synthesis (TTS) of the narration script (`narrate --tts/--mux`)
-- [x] PDF guide export (`generate --pdf`)
+- [x] Voice synthesis (TTS) of the narration script, per-cue aligned (`narrate --tts/--mux`)
+- [x] PDF + DOCX guide export (`generate --pdf --docx`)
 - [x] Monitoring mode (`flowscribe monitor` — interval replays + webhook alerts)
-- [ ] DOCX guide export
-- [ ] Per-cue TTS timing (align audio precisely to each subtitle cue)
-- [ ] Chrome extension recorder (record in your own logged-in browser)
+- [x] Chrome extension recorder (`extension/` + `flowscribe import`)
+- [ ] Publish as an npm package (`npx flowscribe`)
+- [ ] Hosted guide sharing (single self-contained HTML export)

@@ -101,6 +101,14 @@ export function defaultTtsModel(): string {
 
 /** Synthesize speech with Gemini TTS. Returns a playable WAV buffer. */
 export async function geminiTts(req: GeminiTtsRequest): Promise<Buffer> {
+  const { pcm, rate } = await geminiTtsPcm(req);
+  return pcmToWav(pcm, rate);
+}
+
+/** Synthesize speech with Gemini TTS. Returns raw 16-bit mono PCM + rate. */
+export async function geminiTtsPcm(
+  req: GeminiTtsRequest,
+): Promise<{ pcm: Buffer; rate: number }> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -137,11 +145,11 @@ export async function geminiTts(req: GeminiTtsRequest): Promise<Buffer> {
   if (!part?.inlineData?.data) throw new Error('Gemini TTS returned no audio.');
   const pcm = Buffer.from(part.inlineData.data, 'base64');
   const rate = Number(/rate=(\d+)/.exec(part.inlineData.mimeType ?? '')?.[1] ?? 24000);
-  return pcmToWav(pcm, rate);
+  return { pcm, rate };
 }
 
 /** Wrap raw 16-bit mono PCM in a WAV container. */
-function pcmToWav(pcm: Buffer, sampleRate: number, channels = 1): Buffer {
+export function pcmToWav(pcm: Buffer, sampleRate: number, channels = 1): Buffer {
   const header = Buffer.alloc(44);
   const byteRate = sampleRate * channels * 2;
   header.write('RIFF', 0);

@@ -9,6 +9,7 @@ import { narrate } from './narrate.js';
 import { suggestAssertions } from './assertions.js';
 import { startEditor } from './editor.js';
 import { monitor, parseInterval } from './monitor.js';
+import { importSession } from './importSession.js';
 import { loadSession, describeStep } from './session.js';
 
 const program = new Command();
@@ -75,6 +76,7 @@ program
   .option('-l, --langs <codes>', 'comma-separated language codes (e.g. en,fr,ar)', 'en')
   .option('--vision', 'also send click screenshots to Gemini for richer descriptions', false)
   .option('--pdf', 'also render each guide as a PDF', false)
+  .option('--docx', 'also render each guide as a Word document', false)
   .option('--model <model>', 'Gemini model (default: env GEMINI_MODEL or gemini-2.5-flash)')
   .action(async (o) => {
     const langs = String(o.langs).split(',').map((l: string) => l.trim()).filter(Boolean);
@@ -83,6 +85,7 @@ program
       langs,
       vision: !!o.vision,
       pdf: !!o.pdf,
+      docx: !!o.docx,
       model: o.model,
     });
     console.log('\n✔ Guide generated:');
@@ -204,6 +207,16 @@ program
       model: o.model,
       maxRuns: Number(o.maxRuns) || 0,
     });
+  });
+
+program
+  .command('import <file>')
+  .description('Import a .flowscribe.json export from the Chrome extension into a session directory.')
+  .requiredOption('-o, --out <dir>', 'session directory to create')
+  .action(async (file, o) => {
+    const session = await importSession({ file, out: o.out });
+    console.log(`✔ Imported ${session.steps.length} steps into ${path.resolve(o.out)}`);
+    console.log('  All commands now work on it: generate, edit, assert, replay, export-test, narrate, monitor.');
   });
 
 program
